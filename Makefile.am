@@ -9,6 +9,7 @@ testapp_SOURCES = testapp.c util.c util.h stats_prefix.c stats_prefix.h jenkins_
 timedrun_SOURCES = timedrun.c
 
 memcached_SOURCES = memcached.c memcached.h \
+                    zstd_compression.c zstd_compression.h \
                     hash.c hash.h \
                     jenkins_hash.c jenkins_hash.h \
                     murmur3_hash.c murmur3_hash.h \
@@ -96,6 +97,14 @@ memcached_debug_LDFLAGS =
 memcached_DEPENDENCIES =
 memcached_debug_DEPENDENCIES =
 CLEANFILES=
+
+# ---- Zstandard --------------------------------------------------------
+if HAVE_ZSTD
+ memcached_CPPFLAGS += @ZSTD_CFLAGS@ -DUSE_ZSTD  
+ memcached_debug_CFLAGS +=  @ZSTD_CFLAGS@ -DUSE_ZSTD
+ memcached_LDADD += @ZSTD_LIBS@
+ memcached_debug_LDADD += @ZSTD_LIBS@
+endif
 
 if BUILD_LINUX_PRIVS
 memcached_LDADD += -lseccomp

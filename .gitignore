@@ -42,3 +42,6 @@ memcached-*.tar.gz.sha1
 /memcached.spec
 .*.swp
 /compile_commands.json
+.cproject
+.project
+.settings

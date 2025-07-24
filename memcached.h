@@ -59,6 +59,10 @@
 
 #include "sasl_defs.h"
 
+#ifdef USE_ZSTD
+#include "zstd_compression.h"
+#endif
+
 /* for NAPI pinning feature */
 #ifndef SO_INCOMING_NAPI_ID
 #define SO_INCOMING_NAPI_ID 56
@@ -555,6 +559,10 @@ struct settings {
 #ifdef SOCK_COOKIE_ID
     uint32_t sock_cookie_id;
 #endif
+#ifdef USE_ZSTD
+    char *zstd_dict_path;
+    zstd_dict_t zstd_dict;
+#endif
 };
 
 extern struct stats stats;
@@ -587,6 +595,8 @@ extern struct settings settings;
 #define ITEM_STALE 2048
 /* if item key was sent in binary */
 #define ITEM_KEY_BINARY 4096
+/* item is compressed with zstd */
+#define ITEM_ZSTD 8192
 
 /**
  * Structure for storing items within memcached.
@@ -1073,12 +1083,12 @@ void process_stats_conns(ADD_STAT add_stats, void *c);
 extern void setup_privilege_violations_handler(void);
 extern void drop_privileges(void);
 #else
-#define setup_privilege_violations_handler()
-#define drop_privileges()
+#define setup_privilege_violations_handler(void)
+#define drop_privileges(void)
 #endif
 
 #if HAVE_DROP_WORKER_PRIVILEGES
-extern void drop_worker_privileges(void);
+extern void drop_worker_privileges();
 #else
 #define drop_worker_privileges()
 #endif

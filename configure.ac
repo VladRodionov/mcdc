@@ -471,6 +471,42 @@ AC_ARG_WITH(libssl,
        ]
 )
 
+dnl # -------------------------------- Zstandard ----------------------------
+AC_ARG_WITH([zstd],
+  [AS_HELP_STRING([--with-zstd[=DIR]],
+                  [Enable Zstandard compression (optionally DIR = prefix)])],
+  [want_zstd=$withval], [want_zstd=auto])
+
+have_zstd=no
+if test "x$want_zstd" != "xno"; then
+  if test "x$want_zstd" != "xauto"; then
+    ZSTD_CFLAGS="-I$want_zstd/include"
+    ZSTD_LIBS="-L$want_zstd/lib -lzstd"
+    PKG_CONFIG_PATH="$want_zstd/lib/pkgconfig:$PKG_CONFIG_PATH"
+    export PKG_CONFIG_PATH
+  fi
+
+  PKG_CHECK_MODULES([ZSTD], [libzstd >= 1.5], [have_zstd=yes], [
+    AC_CHECK_HEADER([zstd.h], [
+      AC_CHECK_LIB([zstd], [ZSTD_compress],
+                   [ZSTD_CFLAGS= ; ZSTD_LIBS='-lzstd' ; have_zstd=yes])
+    ])
+  ])
+fi
+
+if test "x$have_zstd" = "xyes"; then
+  AC_DEFINE([HAVE_ZSTD], [1], [Define if libzstd is available])
+else
+  if test "x$want_zstd" = "xyes"; then
+    AC_MSG_ERROR([libzstd requested but not found])
+  fi
+fi
+
+AC_SUBST([ZSTD_CFLAGS])
+AC_SUBST([ZSTD_LIBS])
+AM_CONDITIONAL([HAVE_ZSTD], [test "x$have_zstd" = "xyes"])
+dnl # ----------------------------------------------------------------------
+
 dnl ----------------------------------------------------------------------------
 dnl libssl detection.  swiped from libevent.  modified for openssl detection.
 
