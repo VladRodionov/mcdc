@@ -1027,7 +1027,7 @@ item *do_item_get(const char *key, const size_t nkey, const uint32_t hv, LIBEVEN
                 if (rSize != ZSTD_CONTENTSIZE_ERROR && rSize != ZSTD_CONTENTSIZE_UNKNOWN) {
                     char* rBuff = malloc(rSize);
                     if (rBuff != NULL) {
-                        size_t const dSize = zstd_decompress_item(&settings.zstd_dict, ITEM_data(it), it->nbytes, rBuff, rSize);
+                        size_t const dSize = 0; //zstd_decompress_item(&settings.zstd_dict, ITEM_data(it), it->nbytes, rBuff, rSize);
                         if (dSize == rSize) {
                             // Create a new item for the decompressed data
                             item *new_it = item_alloc(ITEM_key(it), it->nkey, 0, it->exptime, rSize);

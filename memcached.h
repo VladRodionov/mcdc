@@ -561,7 +561,7 @@ struct settings {
 #endif
 #ifdef USE_ZSTD
     char *zstd_dict_path;
-    zstd_dict_t zstd_dict;
+    //zstd_dict_t zstd_dict;
 #endif
 };
 
