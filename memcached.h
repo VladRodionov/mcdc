@@ -154,6 +154,27 @@ typedef uint32_t client_flags_t;
 
 #define ITEM_clsid(item) ((item)->slabs_clsid & ~(3<<6))
 #define ITEM_lruid(item) ((item)->slabs_clsid & (3<<6))
+/* ------------------------------------------------------------------ */
+/*  Zstd compression support                                          */
+/* ------------------------------------------------------------------ */
+#ifdef USE_ZSTD
+#define ZSTD_NO_DICTIONARY 0u
+/* true if the item’s value is Zstd-compressed */
+#define ITEM_is_zstd(it_)    (((it_)->it_flags & ITEM_ZSTD) != 0)
+/* Store dictionary-ID and mark the item as Zstd-compressed.        */
+#define ITEM_set_dictid(it_, id_)                                      \
+        do {                                                               \
+            (it_)->zstd_dict_id = (uint16_t)(id_); /* save 2-byte ID  */   \
+            (it_)->it_flags    |= ITEM_ZSTD;       /* set compress flag */ \
+        } while (0)
+/* Retrieve the dictionary ID (undefined if ITEM_ZSTD not set).     */
+#define ITEM_get_dictid(it_)  ((uint16_t)((it_)->zstd_dict_id))
+#else   /* ---- compression disabled: macros compile to no-ops -------- */
+#define ZSTD_NO_DICTIONARY
+#define ITEM_is_zstd(it_)    0
+#define ITEM_set_dictid(it_, id_)   ((void)0)
+#define ITEM_get_dictid(it_)  0u
+#endif
 
 #define STAT_KEY_LEN 128
 #define STAT_VAL_LEN 128
@@ -612,8 +633,12 @@ typedef struct _stritem {
     int             nbytes;     /* size of data */
     unsigned short  refcount;
     uint16_t        it_flags;   /* ITEM_* above */
+
     uint8_t         slabs_clsid;/* which slab class we're in */
     uint8_t         nkey;       /* key length, w/terminating null and padding */
+#ifdef USE_ZSTD
+    uint16_t        zstd_dict_id;
+#endif
     /* this odd type prevents type-punning issues when we do
      * the little shuffle to save space when not using CAS. */
     union {
@@ -660,6 +685,9 @@ typedef struct _strchunk {
     uint16_t         it_flags;  /* ITEM_* above. */
     uint8_t          slabs_clsid; /* Same as above. */
     uint8_t          orig_clsid; /* For obj hdr chunks slabs_clsid is fake. */
+#ifdef USE_ZSTD
+    uint16_t        zstd_dict_id;
+#endif
     char data[];
 } item_chunk;
 

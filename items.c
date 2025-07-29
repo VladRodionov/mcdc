@@ -244,6 +244,9 @@ item_chunk *do_item_alloc_chunk(item_chunk *ch, const size_t bytes_remain) {
     nch->slabs_clsid = id;
     nch->size = size - sizeof(item_chunk);
     nch->it_flags |= ITEM_CHUNK;
+#ifdef USE_ZSTD
+    nch->zstd_dict_id = 0;
+#endif
     slabs_munlock();
     return nch;
 }
@@ -332,7 +335,9 @@ item *do_item_alloc(const char *key, const size_t nkey, const client_flags_t fla
     if (nsuffix > 0) {
         memcpy(ITEM_suffix(it), &flags, sizeof(flags));
     }
-
+#ifdef USE_ZSTD
+    it->zstd_dict_id = 0;          /* or default_dictionary_id */
+#endif
     /* Initialize internal chunk. */
     if (it->it_flags & ITEM_CHUNKED) {
         item_chunk *chunk = (item_chunk *) ITEM_schunk(it);
@@ -343,6 +348,9 @@ item *do_item_alloc(const char *key, const size_t nkey, const client_flags_t fla
         chunk->size = 0;
         chunk->head = it;
         chunk->orig_clsid = hdr_id;
+#ifdef USE_ZSTD
+        chunk->zstd_dict_id = 0;
+#endif
     }
     it->h_next = 0;
 
