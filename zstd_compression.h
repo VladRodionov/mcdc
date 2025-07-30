@@ -39,7 +39,7 @@ typedef struct {
     int level; /* compression level (1-22), 0 = ZSTD default  */
     size_t max_dict; /* max dictionary size, bytes (≤ 220 KB)       */
     size_t min_train_bytes; /* train when collected bytes ≥ this threshold */
-    const char *dict_path; /* NULL ⇒ train live, else preload file  */
+    const char *dict_dir_path; /* NULL ⇒ train live, else preload file  */
     /* Note: if dict_path is set, the trainer thread will not run. */
 } zstd_cfg_t;
 
@@ -55,6 +55,7 @@ typedef struct zstd_ctx_s {
     _Atomic(sample_node_t *) samples_head; /* MPSC list head (push-only) */
     _Atomic(size_t) bytes_pending; /* atomically updated         */
     _Atomic(bool) dict_ready; /* set exactly once by trainer   */
+    _Atomic(uint16_t) cur_dict_id;  /* 0 = none, 1,2,… = active ID */
 
     atomic_uintptr_t cdict; /* current compression dictionary */
     atomic_uintptr_t ddict; /* current decompression dictionary */
@@ -71,10 +72,10 @@ void zstd_destroy(zstd_ctx_t *ctx);
 
 /* Fast-path API for Memcached */
 ssize_t zstd_compress_iov(zstd_ctx_t *ctx, const struct iovec *src, int src_cnt,
-        void **dst, size_t *dst_cap);
+        void **dst, size_t *dst_cap, uint16_t *dict_id_out);
 
 ssize_t zstd_decompress_into_iov(zstd_ctx_t *ctx, const void *src,
-        size_t src_size, const struct iovec *dst, int dst_cnt);
+        size_t src_size, const struct iovec *dst, int dst_cnt, uint16_t dict_id);
 
 /* Feed raw samples for future dictionary training */
 void zstd_sample(zstd_ctx_t *ctx, const void *buf, size_t len);
