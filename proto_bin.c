@@ -536,14 +536,14 @@ static void process_bin_get_or_touch(conn *c, char *extbuf) {
                     failed = true;
                 }
             } else if ((it->it_flags & ITEM_CHUNKED) == 0) {
-                resp_add_iov(c->resp, ITEM_data(it), it->nbytes - 2);
+                resp_add_iov_data(c->resp, it, it->nbytes - 2);
             } else {
                 // Allow transmit handler to find the item and expand iov's
                 resp_add_chunked_iov(c->resp, it, it->nbytes - 2);
             }
 #else
             if ((it->it_flags & ITEM_CHUNKED) == 0) {
-                resp_add_iov(c->resp, ITEM_data(it), it->nbytes - 2);
+                resp_add_iov_data(c->resp, it, it->nbytes - 2);
             } else {
                 resp_add_chunked_iov(c->resp, it, it->nbytes - 2);
             }
@@ -1115,7 +1115,9 @@ static void process_bin_update(conn *c, char *extbuf) {
     if (settings.detail_enabled) {
         stats_prefix_record_set(key, nkey);
     }
-
+#ifdef USE_ZSTD
+    c->req_client_flags = req->message.body.flags;
+#endif
     it = item_alloc(key, nkey, req->message.body.flags,
             realtime(req->message.body.expiration), vlen+2);
 

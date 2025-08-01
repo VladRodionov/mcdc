@@ -612,13 +612,14 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
                           goto stop;
                       }
                   } else if ((it->it_flags & ITEM_CHUNKED) == 0) {
-                      resp_add_iov(resp, ITEM_data(it), it->nbytes);
+                      //resp_add_iov(resp, ITEM_data(it), it->nbytes);
+                      resp_add_iov_data(resp, it, it->nbytes);
                   } else {
                       resp_add_chunked_iov(resp, it, it->nbytes);
                   }
 #else
                   if ((it->it_flags & ITEM_CHUNKED) == 0) {
-                      resp_add_iov(resp, ITEM_data(it), it->nbytes);
+                      resp_add_iov_data(resp, it, it->nbytes);
                   } else {
                       resp_add_chunked_iov(resp, it, it->nbytes);
                   }
@@ -1287,13 +1288,13 @@ static void process_mget_command(conn *c, token_t *tokens, const size_t ntokens)
                     failed = true;
                 }
             } else if ((it->it_flags & ITEM_CHUNKED) == 0) {
-                resp_add_iov(resp, ITEM_data(it), it->nbytes);
+                resp_add_iov_data(resp, it, it->nbytes);
             } else {
                 resp_add_chunked_iov(resp, it, it->nbytes);
             }
 #else
             if ((it->it_flags & ITEM_CHUNKED) == 0) {
-                resp_add_iov(resp, ITEM_data(it), it->nbytes);
+                resp_add_iov_data(resp, it, it->nbytes);
             } else {
                 resp_add_chunked_iov(resp, it, it->nbytes);
             }
@@ -1536,7 +1537,9 @@ static void process_mset_command(conn *c, token_t *tokens, const size_t ntokens)
     // adjusted vlen, or else the data swallowed after error will be for 0b.
     if (has_error)
         goto error;
-
+#ifdef USE_ZSTD
+    c->req_client_flags = of.client_flags;
+#endif
     it = item_alloc(key, nkey, of.client_flags, exptime, vlen);
 
     if (it == 0) {

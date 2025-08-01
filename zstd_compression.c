@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 #include "zstd_compression.h"
 
 #include <pthread.h>
@@ -13,7 +12,7 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <limits.h>         /* PATH_MAX                   */
-
+#include "memcached.h"  /* memcached.h                */
 /* ---------- TLS cache per worker thread ----------------------------- */
 typedef struct {
     ZSTD_CCtx *cctx;
@@ -23,6 +22,13 @@ typedef struct {
 } tls_cache_t;
 
 static __thread tls_cache_t tls; /* zero-initialised */
+
+/* ---------- zstd context --------------------------------------------- */
+static zstd_ctx_t g_zstd;      /* zero-init by the loader */
+
+/* ---------- zstd context helpers ------------------------------------ */
+const zstd_ctx_t *zstd_ctx(void)      { return &g_zstd; }
+zstd_ctx_t       *zstd_ctx_mut(void)  { return &g_zstd; }
 
 /* ---------- helper macros ------------------------------------------- */
 #define CDICT(ctx) ((ZSTD_CDict*)atomic_load_explicit(&(ctx)->cdict, memory_order_acquire))
@@ -98,7 +104,9 @@ static int str_to_u16(const char *s, uint16_t *out) {
  *   If dict_path == NULL it returns 1 (nothing loaded, continue live training).
  *   On I/O/alloc/ZSTD errors returns a negative errno.
  * ------------------------------------------------------------------- */
-static int zstd_load_dicts(zstd_ctx_t *ctx) {
+static int zstd_load_dicts(void) {
+    zstd_ctx_t *ctx = zstd_ctx_mut();
+
     if (!ctx->cfg.dict_dir_path)
         return 1; /* nothing to load, continue live training */
 
@@ -177,8 +185,11 @@ static int zstd_load_dicts(zstd_ctx_t *ctx) {
     return 0;
 }
 
-static int zstd_save_dict(const void *dict, size_t dict_size, zstd_ctx_t *ctx,
+static int zstd_save_dict(const void *dict, size_t dict_size,
         uint16_t dict_id, bool overwrite) {
+
+    zstd_ctx_t *ctx = zstd_ctx_mut();
+
     const char *dir_path = ctx->cfg.dict_dir_path;
     if (!dict || !dict_size || !dir_path || dict_id == 0)
         return -EINVAL;
@@ -214,8 +225,8 @@ static void* trainer_main(void *arg) {
     zstd_ctx_t *ctx = arg;
     size_t max_dict = ctx->cfg.max_dict ? ctx->cfg.max_dict : 110 * 1024;
     size_t train_threshold =
-            ctx->cfg.min_train_bytes ?
-                    ctx->cfg.min_train_bytes : max_dict * 100; /* 100× rule */
+            ctx->cfg.min_train_size ?
+                    ctx->cfg.min_train_size : max_dict * 100; /* 100× rule */
 
     while (1) {
         usleep(100000); /* 100 ms */
@@ -295,7 +306,7 @@ static void* trainer_main(void *arg) {
                         memory_order_relaxed);
                 /* OPTIONAL: save the raw dictionary bytes for future cold-start */
                 if (ctx->cfg.dict_dir_path) { /* reuse same path or another config field */
-                    int rc = zstd_save_dict(dict, dict_sz, ctx, new_id, true);
+                    int rc = zstd_save_dict(dict, dict_sz, new_id, true);
                     if (rc)
                         log_rate_limited(10 * 1000000ULL,
                                 "zstd-dict: could not save dict (%s): %s\n",
@@ -335,7 +346,8 @@ static void* trainer_main(void *arg) {
     return NULL; /* never reached */
 }
 
-static inline bool dict_is_ready(zstd_ctx_t *c) {
+static inline bool dict_is_ready(void) {
+    const zstd_ctx_t *c = zstd_ctx();
     /* any cheap acquire fence is fine; on x86 it's a compiler barrier */
     /* Do we really need this? - this will trash performance*/
     atomic_thread_fence(memory_order_acquire);
@@ -343,15 +355,17 @@ static inline bool dict_is_ready(zstd_ctx_t *c) {
 }
 
 /* ---------- public init / destroy ----------------------------------- */
-int zstd_init(zstd_ctx_t **out, const zstd_cfg_t *cfg) {
-    zstd_ctx_t *ctx = calloc(1, sizeof(*ctx));
+int zstd_init( const zstd_cfg_t *cfg) {
+    zstd_ctx_t *ctx = zstd_ctx_mut();
     if (!ctx)
         return -ENOMEM;
     /* 1. configuration */
-    ctx->cfg = cfg ? *cfg : (zstd_cfg_t ) { .level = 1, .max_dict = 110 * 1024,
-                             .min_train_bytes = 110 * 1024 * 100,
-                             .dict_dir_path =
-                             NULL };
+    ctx->cfg = cfg ? *cfg : (zstd_cfg_t ) { .level = 3, .max_dict = 110 * 1024,
+                             .min_train_size = 110 * 1024 * 100,
+                             .min_comp_size = 32,
+                             .max_comp_size = 64 * 1024,
+                             .compress_keys = false,
+                             .dict_dir_path = NULL };
     /* 2. atomic pointers / counters */
     atomic_init(&ctx->samples_head, NULL); /* empty list            */
     atomic_init(&ctx->bytes_pending, 0);
@@ -362,14 +376,13 @@ int zstd_init(zstd_ctx_t **out, const zstd_cfg_t *cfg) {
     ctx->trainer_tid = (pthread_t ) { 0 }; /* will be set by trainer thread */
 
     /* try external dictionary first */
-    int rc = zstd_load_dicts(ctx);
+    int rc = zstd_load_dicts();
     if (rc < 0) {
         free(ctx);
         return rc;
     }
     if (rc == 0) {
         ctx->trainer_tid = pthread_self(); /* dummy thread ID *//* dictionary loaded → done     */
-        *out = ctx;
         return 0;
     }
 
@@ -383,11 +396,12 @@ int zstd_init(zstd_ctx_t **out, const zstd_cfg_t *cfg) {
     log_rate_limited(1000000ULL, /* 1 s */
     "zstd-dict: trainer thread started (max_dict=%zu B)\n", ctx->cfg.max_dict);
 
-    *out = ctx;
     return 0;
 }
 
-void zstd_destroy(zstd_ctx_t *ctx) {
+void zstd_destroy(void) {
+    zstd_ctx_t *ctx = zstd_ctx_mut();
+
     /* note: trainer thread is detached and loops forever; in production
      you may add a stop flag + join, or just let process exit */
     ZSTD_CDict *cd = CDICT(ctx);
@@ -415,15 +429,17 @@ void zstd_destroy(zstd_ctx_t *ctx) {
     }
 }
 
-void zstd_sample(zstd_ctx_t *ctx, const void *src, size_t len) {
+void zstd_sample(const void *src, size_t len) {
+    zstd_ctx_t *ctx = zstd_ctx_mut();
+
     if (len > 16 * 1024) /* skip very large items            */
         return;
-    if (dict_is_ready(ctx)) /* skip if dictionary is ready */
+    if (dict_is_ready()) /* skip if dictionary is ready */
         return;
     /* ---- back-pressure: stop once corpus ≥ min_train_bytes ---------- */
     size_t limit =
-            ctx->cfg.min_train_bytes ?
-                    ctx->cfg.min_train_bytes : ctx->cfg.max_dict * 100; /* 100× rule */
+            ctx->cfg.min_train_size ?
+                    ctx->cfg.min_train_size : ctx->cfg.max_dict * 100; /* 100× rule */
 
     if (atomic_load_explicit(&ctx->bytes_pending, memory_order_relaxed)
             >= limit)
@@ -463,15 +479,19 @@ void zstd_sample(zstd_ctx_t *ctx, const void *src, size_t len) {
  *   < 0  negative errno / ZSTD error code                             */
 /* ------------------------------------------------------------------ */
 static inline const ZSTD_DDict*
-get_ddict_by_id(zstd_ctx_t *ctx, uint16_t id)
+get_ddict_by_id(uint16_t id)
 /* For now we support only one live dictionary (id==1). When you implement
  * rotation, change this helper to do a table lookup or array index.          */
 {
+    zstd_ctx_t *ctx = zstd_ctx_mut();
     return (id == 1) ? DDICT(ctx) : NULL;
 }
 
 static inline const ZSTD_CDict*
-get_cdict_by_id(zstd_ctx_t *ctx, uint16_t id) {
+get_cdict_by_id(uint16_t id) {
+    zstd_ctx_t *ctx = zstd_ctx_mut();
+    /* For now we support only one live dictionary (id==1). When you implement
+     * rotation, change this helper to do a table lookup or array index.          */
     return (id == 1) ? CDICT(ctx) : NULL;
 }
 
@@ -480,8 +500,10 @@ get_cdict_by_id(zstd_ctx_t *ctx, uint16_t id) {
  *  • On success: returns compressed size (≥0) and sets *dict_id_out.
  *  • On error  : returns negative errno / ZSTD error; *dict_id_out == 0.
  * ----------------------------------------------------------------*/
-ssize_t zstd_compress_iov(zstd_ctx_t *ctx, const struct iovec *src, int src_cnt,
+ssize_t zstd_compress_iov(const struct iovec *src, int src_cnt,
         void **dst, size_t *dst_cap, uint16_t *dict_id_out) {
+    zstd_ctx_t *ctx = zstd_ctx_mut();
+    /* 0) sanity checks ----------------------------------------------- */
     if (!ctx || !src || src_cnt <= 0 || !dst || !dst_cap || !dict_id_out)
         return -EINVAL; /* invalid arguments */
     /* 1) total source length -------------------------------------- */
@@ -516,7 +538,7 @@ ssize_t zstd_compress_iov(zstd_ctx_t *ctx, const struct iovec *src, int src_cnt,
     /* set dictionary id used; 0 - no dictionary*/
     *dict_id_out = did;
 
-    const ZSTD_CDict *cd = get_cdict_by_id(ctx, did);
+    const ZSTD_CDict *cd = get_cdict_by_id(did);
     size_t out_sz;
     if (cd) {
         out_sz = ZSTD_compress_usingCDict(tls.cctx, dst_buf, out_bound, src_buf,
@@ -533,44 +555,126 @@ ssize_t zstd_compress_iov(zstd_ctx_t *ctx, const struct iovec *src, int src_cnt,
     return (ssize_t) out_sz;
 }
 
-ssize_t zstd_decompress_into_iov(zstd_ctx_t *ctx, const void *src,
-        size_t src_sz, const struct iovec *dst, int dst_cnt, uint16_t dict_id) {
+/* -----------------------------------------------------------------
+ * Compress an value.
+ *  • On success: returns compressed size (≥0) and sets *dict_id_out.
+ *  • On error  : returns negative errno / ZSTD error; *dict_id_out == 0.
+ * ----------------------------------------------------------------*/
+ssize_t zstd_maybe_compress(const void *src, size_t src_sz,
+                    void **dst, uint16_t *dict_id_out)
+{
+    zstd_ctx_t *ctx = zstd_ctx_mut();          /* global-static instance */
+
+    /* 0.  sanity checks ------------------------------------------ */
+    if (!ctx || !src || src_sz == 0 || !dst || !dict_id_out)
+        return -EINVAL;
+
+    if ((ctx->cfg.min_comp_size && src_sz < ctx->cfg.min_comp_size) ||
+        (ctx->cfg.max_comp_size && src_sz > ctx->cfg.max_comp_size))
+        return 0;                              /* bypass */
+
+    /* 1.  choose dictionary -------------------------------------- */
+    uint16_t did = atomic_load_explicit(&ctx->cur_dict_id,
+                                        memory_order_acquire);
+    const ZSTD_CDict *cd = did ? get_cdict_by_id(did) : NULL;
+
+    /* 2.  prepare TLS scratch ------------------------------------ */
+    size_t bound = ZSTD_compressBound(src_sz);
+    tls_ensure(bound);                         /* ensure scratch ≥ bound */
+    void *dst_buf = tls.scratch;
+
+    /* 3.  compress ----------------------------------------------- */
+    size_t csz = cd
+        ? ZSTD_compress_usingCDict(tls.cctx, dst_buf, bound,
+                                   src, src_sz, cd)
+        : ZSTD_compressCCtx      (tls.cctx, dst_buf, bound,
+                                   src, src_sz, ctx->cfg.level);
+
+    if (ZSTD_isError(csz))
+        return -(ssize_t)ZSTD_getErrorCode(csz);
+
+    /* 4.  ratio check – skip if no benefit ----------------------- */
+    if (csz >= src_sz)
+        return 0;
+
+    /* 5.  success ------------------------------------------------ */
+    *dst         = dst_buf;          /* valid until same thread calls tls_ensure() again */
+    *dict_id_out = cd ? did : 0;     /* 0 = no dictionary             */
+    return (ssize_t)csz;
+}
+
+ssize_t zstd_decompress(const void *src,
+        size_t src_sz, void *dst, size_t dst_sz, uint16_t dict_id) {
+    zstd_ctx_t *ctx = zstd_ctx_mut();
+    /* 0) sanity checks ----------------------------------------------- */
+    if (!ctx || !src || src_sz == 0 || !dst || dst_sz <= 0)
+        return -EINVAL; /* invalid arguments */
     /* 1) compute output capacity ---------------------------------- */
-    size_t out_cap = 0;
-    for (int i = 0; i < dst_cnt; ++i)
-        out_cap += dst[i].iov_len;
-
-    tls_ensure(out_cap); /* scratch ≥ total out bytes */
-
     /* 2) pick decompression path ---------------------------------- */
     size_t out_sz;
     if (dict_id == 0) {
-        out_sz = ZSTD_decompressDCtx(tls.dctx, tls.scratch, out_cap, src,
+        out_sz = ZSTD_decompressDCtx(tls.dctx, dst, dst_sz, src,
                 src_sz);
     } else {
-        const ZSTD_DDict *dict = get_ddict_by_id(ctx, dict_id);
+        const ZSTD_DDict *dict = get_ddict_by_id(dict_id);
         if (!dict)
             return -EINVAL; /* unknown dictionary ID     */
 
-        out_sz = ZSTD_decompress_usingDDict(tls.dctx, tls.scratch, out_cap, src,
+        out_sz = ZSTD_decompress_usingDDict(tls.dctx, dst, dst_sz, src,
                 src_sz, dict);
     }
 
     if (ZSTD_isError(out_sz))
         return -(ssize_t)ZSTD_getErrorCode(out_sz);   /* correct sign */
 
-    if (out_sz > out_cap)
+    if (out_sz > dst_sz)
         return -EOVERFLOW;                            /* caller too small */
 
-    /* 3) scatter-copy to caller buffers --------------------------- */
-    /* scatter-copy only `out_sz` bytes */
-    const char *p = tls.scratch;
-    size_t remain = out_sz;
-    for (int i = 0; i < dst_cnt && remain; ++i) {
-        size_t n = remain < dst[i].iov_len ? remain : dst[i].iov_len;
-        memcpy(dst[i].iov_base, p, n);
-        p      += n;
-        remain -= n;
-    }
-    return (ssize_t)out_sz;
+    return (ssize_t) out_sz;
+}
+
+/* Return values
+ *   >0  : decompressed length
+ *    0  : either ITEM_ZSTD flag not set  *or*  item is chunked
+ *   <0  : negative errno / ZSTD error code
+ */
+ssize_t zstd_maybe_decompress(const item *it, mc_resp    *resp) {
+    zstd_ctx_t *ctx = zstd_ctx_mut();
+    if (!ctx || !it || !resp)
+        return -EINVAL;                  /* invalid arguments */
+    /* 1. Skip if not compressed or chunked ------------------------ */
+     if (!(it->it_flags & ITEM_ZSTD) || (it->it_flags & ITEM_CHUNKED))
+         return 0;                         /* treat as plain payload */
+
+     /* 2. Dictionary lookup --------------------------------------- */
+     uint16_t  did = ITEM_get_dictid(it);
+     const ZSTD_DDict *dd = get_ddict_by_id(did);
+     if (!dd)
+         return -EINVAL;                  /* unknown dict id */
+
+     /* 3. Prepare destination buffer ------------------------------ */
+     const void *src     = ITEM_data(it);
+     size_t      compLen = it->nbytes;
+
+     size_t expect = ZSTD_getFrameContentSize(src, compLen);
+     if (expect == ZSTD_CONTENTSIZE_ERROR)
+         return -EINVAL;
+     if (expect == ZSTD_CONTENTSIZE_UNKNOWN)
+         expect = compLen * 4u;           /* pessimistic */
+
+     void *dst = malloc(expect);
+     if (!dst)
+         return -ENOMEM;
+
+     /* 4. Decompress ---------------------------------------------- */
+     ssize_t dec = zstd_decompress(src, compLen, dst, expect, did);
+
+     if (dec < 0) {                       /* ZSTD error */
+         free(dst);
+         return dec;
+     }
+
+     /* 5. Hand buffer to network layer ---------------------------- */
+     resp->write_and_free = dst;
+     return dec;                          /* decompressed bytes */
 }

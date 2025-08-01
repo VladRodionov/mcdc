@@ -38,7 +38,10 @@ typedef uintptr_t atomic_uintptr_t;
 typedef struct {
     int level; /* compression level (1-22), 0 = ZSTD default  */
     size_t max_dict; /* max dictionary size, bytes (≤ 220 KB)       */
-    size_t min_train_bytes; /* train when collected bytes ≥ this threshold */
+    size_t min_train_size; /* minimum data size for dictionary training */
+    size_t min_comp_size; /* minimum value size for compression */
+    size_t max_comp_size; /* maximum value size for compression */
+    bool   compress_keys; /* compress keys (default: false) */
     const char *dict_dir_path; /* NULL ⇒ train live, else preload file  */
     /* Note: if dict_path is set, the trainer thread will not run. */
 } zstd_cfg_t;
@@ -67,21 +70,20 @@ typedef struct zstd_ctx_s {
 /* typedef struct zstd_ctx_s zstd_ctx_t;*/
 
 /* Global init / destroy */
-int zstd_init(zstd_ctx_t **out, const zstd_cfg_t *cfg);
-void zstd_destroy(zstd_ctx_t *ctx);
+int zstd_init(const zstd_cfg_t *cfg);
+void zstd_destroy(void);
 
 /* Fast-path API for Memcached */
-ssize_t zstd_compress_iov(zstd_ctx_t *ctx, const struct iovec *src, int src_cnt,
+ssize_t zstd_compress_iov(const struct iovec *src, int src_cnt,
         void **dst, size_t *dst_cap, uint16_t *dict_id_out);
 
-ssize_t zstd_decompress_into_iov(zstd_ctx_t *ctx, const void *src,
-        size_t src_size, const struct iovec *dst, int dst_cnt, uint16_t dict_id);
+ssize_t zstd_decompress(const void *src,
+        size_t src_size, void *dst, size_t dst_sz, uint16_t dict_id);
+ssize_t zstd_maybe_compress(const void *src, size_t src_sz,
+                    void **dst, uint16_t *dict_id_out);
 
 /* Feed raw samples for future dictionary training */
-void zstd_sample(zstd_ctx_t *ctx, const void *buf, size_t len);
-
-/* ----- public query helpers ---------------------------------------- */
-bool zstd_dict_ready(const zstd_ctx_t *ctx); /* has final dict   */
+void zstd_sample(const void *buf, size_t len);
 
 /* =======================  NEW STATS SECTION  ========================= */
 typedef struct {
@@ -91,5 +93,22 @@ typedef struct {
 } zstd_stats_t;
 
 void zstd_get_stats(zstd_stats_t *out);
+
+
+/* forward declarations – no memcached.h needed here */
+struct _stritem;     /* real 'item' struct in items.h   */
+typedef struct _stritem item;
+
+typedef struct _mc_resp mc_resp;  /* defined in memcached.c */
+
+/* Return values
+ *   >0  : decompressed length
+ *    0  : either ITEM_ZSTD flag not set  *or*  item is chunked
+ *   <0  : negative errno / ZSTD error code
+ */
+ssize_t zstd_maybe_decompress(const item *it, mc_resp    *resp);
+
+const zstd_ctx_t *zstd_ctx(void);
+zstd_ctx_t       *zstd_ctx_mut(void);
 
 #endif /* ZSTD_COMPRESSION_H */

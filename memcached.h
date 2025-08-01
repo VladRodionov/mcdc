@@ -946,6 +946,9 @@ struct conn {
     ssize_t (*read)(conn  *c, void *buf, size_t count);
     ssize_t (*sendmsg)(conn *c, struct msghdr *msg, int flags);
     ssize_t (*write)(conn *c, void *buf, size_t count);
+#ifdef USE_ZSTD
+    client_flags_t req_client_flags; /* client flags from request */
+#endif
 };
 
 /* array of conn structures, indexed by file descriptor */
@@ -1085,6 +1088,7 @@ item* limited_get_locked(const char *key, size_t nkey, LIBEVENT_THREAD *t, bool 
 // Read/Response object handlers.
 void resp_reset(mc_resp *resp);
 void resp_add_iov(mc_resp *resp, const void *buf, int len);
+void resp_add_iov_data(mc_resp *resp, item *it, int len);
 void resp_add_chunked_iov(mc_resp *resp, const void *buf, int len);
 bool resp_start(conn *c);
 mc_resp *resp_start_unlinked(conn *c);

@@ -726,6 +726,9 @@ conn *conn_new(const int sfd, enum conn_states init_state,
 #endif
 
     c->noreply = false;
+#ifdef USE_ZSTD
+    c->req_client_flags = (client_flags_t) 0;
+#endif
 
     if (ssl) {
         // musn't get here without ssl enabled.
@@ -996,6 +999,35 @@ void resp_add_iov(mc_resp *resp, const void *buf, int len) {
     resp->iov[x].iov_len = len;
     resp->iovcnt++;
     resp->tosend += len;
+}
+
+void resp_add_iov_data(mc_resp *resp, item *it, int len){
+    assert(resp->iovcnt < MC_RESP_IOVCOUNT);
+    int    idx = resp->iovcnt;   /* slot we will fill            */
+    size_t sz  = (size_t)len;    /* bytes that will be sent      */
+    void  *ptr = ITEM_data(it);  /* default pointer              */
+
+#ifdef USE_ZSTD
+    /* zstd_maybe_decompress() may set resp->write_and_free            */
+    ssize_t ds = zstd_maybe_decompress(it, resp);
+    if (ds > 0) {                        /* success: use plain data  */
+        ptr = resp->write_and_free;
+        sz  = (size_t)ds;
+    } else if (ds < 0) {                 /* decompression failed     */
+        fprintf(stderr,
+            "ERROR: decompression failed for item %.*s (%d B), "
+            "sending compressed copy.\n",
+            it->nkey, ITEM_key(it), it->nbytes);
+        /* ptr, sz already point to compressed bytes */
+    }
+    /* ds == 0 → not compressed: keep defaults                       */
+#endif
+
+    /* fill iovec only once we know the final pointer/length          */
+    resp->iov[idx].iov_base = ptr;
+    resp->iov[idx].iov_len  = sz;
+    resp->iovcnt++;
+    resp->tosend           += (int)sz;
 }
 
 // Notes that an IOV should be handled as a chunked item header.
@@ -1420,6 +1452,27 @@ static void reset_cmd_handler(conn *c) {
     }
 }
 
+#ifdef USE_ZSTD
+static inline bool is_zstd_not_supported_cmd(conn *c) {
+
+#ifdef PROXY
+    if (c->protocol == proxy_prot){
+        return true;
+    }
+#endif
+
+    if (c->protocol == ascii_prot)
+        return c->cmd == NREAD_APPEND || c->cmd == NREAD_PREPEND ||
+               c->cmd == NREAD_APPENDVIV || c->cmd == NREAD_PREPENDVIV;
+    else if (c->protocol == binary_prot)
+        return c->cmd == NREAD_APPEND  ||
+               c->cmd == NREAD_PREPEND ;
+    else
+        return true; // unknown protocol, assume not supported.
+}
+
+#endif // USE_ZSTD
+
 static void complete_nread(conn *c) {
     assert(c != NULL);
 #ifdef PROXY
@@ -1427,8 +1480,48 @@ static void complete_nread(conn *c) {
            || c->protocol == binary_prot
            || c->protocol == proxy_prot);
 #else
-    assert(c->protocol == ascii_prot
-           || c->protocol == binary_prot);
+    assert(c->protocol == ascii_prot || c->protocol == binary_prot);
+#endif
+#ifdef USE_ZSTD
+    if (!is_zstd_not_supported_cmd(c)) {
+    /* If we get here, we have a valid item to compress.
+    * c->item is set by the command handler, so we can use it.
+    * If the item is not compressed, it will be left as-is.
+    * If it is compressed, c->item will be replaced with a new item.
+    */
+    item   *oit  = c->item;                     /* original item          */
+    void   *cbuf = NULL;                        /* TLS scratch from helper*/
+    uint16_t did = 0;                           /* dictionary id          */
+
+    /* Try to compress -------------------------------------------------- */
+    ssize_t clen = zstd_maybe_compress(ITEM_data(oit), oit->nbytes,
+                                       &cbuf, &did);
+
+    if (clen > 0) {             /* Success → store compressed copy */
+        /* 1. Allocate a new, smaller item in the correct slab class    */
+        item *nit = do_item_alloc(ITEM_key(oit), oit->nkey,
+                                  c->req_client_flags, oit->exptime, (int)clen);
+        if (nit) {
+            /* 2. Copy compressed bytes, set flag + dict ID             */
+            memcpy(ITEM_data(nit), cbuf, (size_t)clen);
+            ITEM_set_dictid(nit, did);
+            if (oit->it_flags & ITEM_CAS) {      /* preserve CAS if present */
+              ITEM_set_cas(nit, ITEM_get_cas(oit));
+            }
+            /* keep compact-flags indication if the old item had it */
+            if (oit->it_flags & ITEM_CFLAGS) {
+                nit->it_flags |= ITEM_CFLAGS;
+                /* copy binary flags blob */
+                memcpy(ITEM_suffix(nit), ITEM_suffix(oit), sizeof(client_flags_t));
+            }
+            c->item = nit;                    /* swap in the new item    */
+            item_remove(oit);                 /* drop ref to raw copy    */
+        } /* else OOM: fall through and keep uncompressed item */
+    }
+    /* clen == 0  →  skip: value too small/large or no benefit
+     * clen < 0   →  compression error, already logged inside helper
+     *             keep original item in either case                */
+    }
 #endif
     if (c->protocol == ascii_prot) {
         complete_nread_ascii(c);
@@ -1440,6 +1533,7 @@ static void complete_nread(conn *c) {
 #endif
     }
 }
+
 
 /* Destination must always be chunked */
 /* This should be part of item.c */
