@@ -462,7 +462,7 @@ void zstd_sample(const void *src, size_t len) {
         return; /* trainer hasn’t processed yet     */
 
     /* ---- allocate sample node -------------------------------------- */
-    sample_node_t *node = malloc(sizeof(*node));
+    sample_node_t *node = malloc(sizeof(sample_node_t));
     if (!node)
         return;
     node->buf = malloc(len);
@@ -567,6 +567,8 @@ ssize_t zstd_decompress(const void *src,
         return -EINVAL; /* invalid arguments */
     /* 1) compute output capacity ---------------------------------- */
     /* 2) pick decompression path ---------------------------------- */
+    /* We call this function to init TLS contexts */
+    tls_ensure(0);
     size_t out_sz;
     if (dict_id == 0) {
         out_sz = ZSTD_decompressDCtx(tls.dctx, dst, dst_sz, src,
@@ -589,6 +591,11 @@ ssize_t zstd_decompress(const void *src,
     return (ssize_t) out_sz;
 }
 
+ssize_t inline zstd_orig_size(const void *src, size_t comp_size){
+    /* TODO if size in available ?*/
+    return ZSTD_getFrameContentSize(src, comp_size);
+}
+
 /* Return values
  *   >0  : decompressed length
  *    0  : either ITEM_ZSTD flag not set  *or*  item is chunked
@@ -605,7 +612,7 @@ ssize_t zstd_maybe_decompress(const item *it, mc_resp    *resp) {
      /* 2. Dictionary lookup --------------------------------------- */
      uint16_t  did = ITEM_get_dictid(it);
      const ZSTD_DDict *dd = get_ddict_by_id(did);
-     if (!dd)
+     if (!dd && did > 0)
          return -EINVAL;                  /* unknown dict id */
 
      /* 3. Prepare destination buffer ------------------------------ */

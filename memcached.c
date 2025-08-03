@@ -1498,6 +1498,8 @@ static void complete_nread(conn *c) {
                                        &cbuf, &did);
 
     if (clen > 0) {             /* Success → store compressed copy */
+        /* 0. Add to dictinary training set (if necessary) */
+        zstd_sample(ITEM_data(oit), oit->nbytes);
         /* 1. Allocate a new, smaller item in the correct slab class    */
         item *nit = do_item_alloc(ITEM_key(oit), oit->nkey,
                                   c->req_client_flags, oit->exptime, (int)clen);

@@ -79,7 +79,7 @@ ssize_t zstd_decompress(const void *src,
         size_t src_size, void *dst, size_t dst_sz, uint16_t dict_id);
 ssize_t zstd_maybe_compress(const void *src, size_t src_sz,
                     void **dst, uint16_t *dict_id_out);
-
+ssize_t zstd_orig_size(const void *src, size_t comp_size);
 /* Feed raw samples for future dictionary training */
 void zstd_sample(const void *buf, size_t len);
 
