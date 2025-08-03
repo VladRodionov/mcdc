@@ -6010,6 +6010,9 @@ int main (int argc, char **argv) {
     logger_init();
     logger_create(); // main process logger
     conn_init();
+#ifdef USE_ZSTD
+    zstd_init(NULL);
+#endif
     bool reuse_mem = false;
     void *mem_base = NULL;
     bool prefill = false;

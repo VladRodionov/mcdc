@@ -141,7 +141,7 @@ void complete_nread_ascii(conn *c) {
     pthread_mutex_lock(&c->thread->stats.mutex);
     c->thread->stats.slab_stats[ITEM_clsid(it)].set_cmds++;
     pthread_mutex_unlock(&c->thread->stats.mutex);
-
+#ifndef USE_ZSTD
     if ((it->it_flags & ITEM_CHUNKED) == 0) {
         if (strncmp(ITEM_data(it) + it->nbytes - 2, "\r\n", 2) == 0) {
             is_valid = true;
@@ -169,7 +169,9 @@ void complete_nread_ascii(conn *c) {
             assert(1 == 0);
         }
     }
-
+#else
+    is_valid = true;
+#endif
     if (!is_valid) {
         // metaset mode always returns errors.
         if (c->mset_res) {
@@ -592,7 +594,11 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
                 {
                   MEMCACHED_COMMAND_GET(c->sfd, ITEM_key(it), it->nkey,
                                         it->nbytes, ITEM_get_cas(it));
+#ifdef USE_ZSTD
+                  int nbytes = ITEM_is_zstd(it)? zstd_orig_size(ITEM_data(it), it->nbytes):it->nbytes;
+#else
                   int nbytes = it->nbytes;
+#endif
                   char *p = resp->wbuf;
                   memcpy(p, "VALUE ", 6);
                   p += 6;
@@ -1159,12 +1165,17 @@ static void process_mget_command(conn *c, token_t *tokens, const size_t ntokens)
         }
     }
 
+#ifdef USE_ZSTD
+    int nbytes = ITEM_is_zstd(it)? zstd_orig_size(ITEM_data(it), it->nbytes):it->nbytes;
+#else
+    int nbytes = it->nbytes;
+#endif
     // don't have to check result of add_iov() since the iov size defaults are
     // enough.
     if (it) {
         if (of.value) {
             memcpy(p, "VA ", 3);
-            p = itoa_u32(it->nbytes-2, p+3);
+            p = itoa_u32(nbytes-2, p+3);
         } else {
             memcpy(p, "HD", 2);
             p += 2;
@@ -1194,7 +1205,7 @@ static void process_mget_command(conn *c, token_t *tokens, const size_t ntokens)
                     break;
                 case 's':
                     META_CHAR(p, 's');
-                    p = itoa_u32(it->nbytes-2, p);
+                    p = itoa_u32(nbytes-2, p);
                     break;
                 case 't':
                     // TTL remaining as of this request.

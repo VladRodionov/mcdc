@@ -12,6 +12,9 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <limits.h>         /* PATH_MAX                   */
+/*  add these two lines  */
+#include <sys/types.h>
+#include <sys/stat.h>
 #include "memcached.h"  /* memcached.h                */
 /* ---------- TLS cache per worker thread ----------------------------- */
 typedef struct {
@@ -193,6 +196,19 @@ static int zstd_save_dict(const void *dict, size_t dict_size,
     const char *dir_path = ctx->cfg.dict_dir_path;
     if (!dict || !dict_size || !dir_path || dict_id == 0)
         return -EINVAL;
+    /* -- ensure directory exists ----------------------------------- */
+    struct stat st;
+    if (stat(dir_path, &st) == -1) {
+        if (errno == ENOENT) {
+            /* try to create it */
+            if (mkdir(dir_path, 0755) == -1 && errno != EEXIST)
+                return -errno;
+        } else {
+            return -errno;                /* stat failed for other reason */
+        }
+    } else if (!S_ISDIR(st.st_mode)) {
+        return -ENOTDIR;                  /* path exists but is not a dir */
+    }
     /* build path "<dir>/<id>" */
     char path[PATH_MAX];
     int n = snprintf(path, sizeof(path), "%s/%hu", dir_path, dict_id);
@@ -431,8 +447,8 @@ void zstd_destroy(void) {
 
 void zstd_sample(const void *src, size_t len) {
     zstd_ctx_t *ctx = zstd_ctx_mut();
-
-    if (len > 16 * 1024) /* skip very large items            */
+    /* skip very large and very small items */
+    if (len >ctx->cfg.max_comp_size || len < ctx->cfg.min_comp_size)
         return;
     if (dict_is_ready()) /* skip if dictionary is ready */
         return;
@@ -493,66 +509,6 @@ get_cdict_by_id(uint16_t id) {
     /* For now we support only one live dictionary (id==1). When you implement
      * rotation, change this helper to do a table lookup or array index.          */
     return (id == 1) ? CDICT(ctx) : NULL;
-}
-
-/* -----------------------------------------------------------------
- * Compress an iovec value.
- *  • On success: returns compressed size (≥0) and sets *dict_id_out.
- *  • On error  : returns negative errno / ZSTD error; *dict_id_out == 0.
- * ----------------------------------------------------------------*/
-ssize_t zstd_compress_iov(const struct iovec *src, int src_cnt,
-        void **dst, size_t *dst_cap, uint16_t *dict_id_out) {
-    zstd_ctx_t *ctx = zstd_ctx_mut();
-    /* 0) sanity checks ----------------------------------------------- */
-    if (!ctx || !src || src_cnt <= 0 || !dst || !dst_cap || !dict_id_out)
-        return -EINVAL; /* invalid arguments */
-    /* 1) total source length -------------------------------------- */
-    size_t src_sz = 0;
-    for (int i = 0; i < src_cnt; ++i)
-        src_sz += src[i].iov_len;
-
-    /* 2) gather into TLS scratch ---------------------------------- */
-    tls_ensure(src_sz); /* scratch ≥ src_sz */
-    char *src_buf = tls.scratch;
-    char *p = src_buf;
-    for (int i = 0; i < src_cnt; ++i) {
-        memcpy(p, src[i].iov_base, src[i].iov_len);
-        p += src[i].iov_len;
-    }
-
-    /* 3) ensure caller buffer big enough -------------------------- */
-    size_t out_bound = ZSTD_compressBound(src_sz);
-    if (!*dst || *dst_cap < out_bound) {
-        void *tmp = realloc(*dst, out_bound);
-        if (!tmp)
-            return -ENOMEM;
-        *dst = tmp;
-        *dst_cap = out_bound;
-    }
-    void *dst_buf = *dst;
-
-    /* 4) compress ------------------------------------------------- */
-    /* ---------------- choose dictionary -------------------------- */
-    uint16_t did = atomic_load_explicit(&ctx->cur_dict_id,
-            memory_order_acquire);
-    /* set dictionary id used; 0 - no dictionary*/
-    *dict_id_out = did;
-
-    const ZSTD_CDict *cd = get_cdict_by_id(did);
-    size_t out_sz;
-    if (cd) {
-        out_sz = ZSTD_compress_usingCDict(tls.cctx, dst_buf, out_bound, src_buf,
-                src_sz, cd);
-    } else {
-        out_sz = ZSTD_compressCCtx(tls.cctx, dst_buf, out_bound, src_buf,
-                src_sz, ctx->cfg.level);
-        /* dict_id_out remains 0 */
-    }
-
-    if (ZSTD_isError(out_sz))
-        return -(ssize_t)ZSTD_getErrorCode(out_sz);   /* correct sign */
-
-    return (ssize_t) out_sz;
 }
 
 /* -----------------------------------------------------------------

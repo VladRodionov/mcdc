@@ -74,8 +74,6 @@ int zstd_init(const zstd_cfg_t *cfg);
 void zstd_destroy(void);
 
 /* Fast-path API for Memcached */
-ssize_t zstd_compress_iov(const struct iovec *src, int src_cnt,
-        void **dst, size_t *dst_cap, uint16_t *dict_id_out);
 
 ssize_t zstd_decompress(const void *src,
         size_t src_size, void *dst, size_t dst_sz, uint16_t dict_id);

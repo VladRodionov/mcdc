@@ -45,3 +45,4 @@ memcached-*.tar.gz.sha1
 .cproject
 .project
 .settings
+mc/*
