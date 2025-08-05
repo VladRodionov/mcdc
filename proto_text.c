@@ -2057,7 +2057,9 @@ static void process_update_command(conn *c, token_t *tokens, const size_t ntoken
     if (settings.detail_enabled) {
         stats_prefix_record_set(key, nkey);
     }
-
+#ifdef USE_ZSTD
+    c->req_client_flags = flags;
+#endif
     it = item_alloc(key, nkey, flags, exptime, vlen);
 
     if (it == 0) {

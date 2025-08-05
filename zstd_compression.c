@@ -50,7 +50,7 @@ static void tls_ensure(size_t need) {
 
 static zstd_stats_t zstd_stats = { 0 };
 
-/* Optional helper you can expose via “stats zstd” command */
+/* Optional helper exposed via “stats zstd” command */
 void zstd_get_stats(zstd_stats_t *out) {
     *out = zstd_stats;
 }
@@ -109,13 +109,18 @@ static int str_to_u16(const char *s, uint16_t *out) {
  * ------------------------------------------------------------------- */
 static int zstd_load_dicts(void) {
     zstd_ctx_t *ctx = zstd_ctx_mut();
-
+    /*For testin only */
+    ctx->cfg.dict_dir_path = "/Users/vrodionov/Development/memcached/dict/airbnb";
     if (!ctx->cfg.dict_dir_path)
         return 1; /* nothing to load, continue live training */
 
     DIR *d = opendir(ctx->cfg.dict_dir_path);
-    if (!d)
-        return -ENOENT;
+    if (!d){
+        int e = errno;
+        fprintf(stderr, "[zstd::zstd_load_dicts] opendir(%s) failed: %s\n",
+                ctx->cfg.dict_dir_path, strerror(e));
+        return -e;           /* or handle specifically */
+    }
 
     struct dirent *de;
     uint16_t id = 0;
@@ -137,6 +142,8 @@ static int zstd_load_dicts(void) {
     /* read file */
     FILE *f = fopen(full, "rb");
     if (!f)
+        fprintf(stderr, "[zstd::zstd_load_dicts] fopen(%s) failed: %s\n",
+                full, strerror(errno));
         return -errno; /* I/O error */
 
     fseek(f, 0, SEEK_END);
@@ -150,6 +157,7 @@ static int zstd_load_dicts(void) {
     void *buf = malloc(file_size);
     if (!buf) {
         fclose(f);
+        fprintf(stderr, "[zstd::zstd_load_dicts] malloc failed\n");
         return -ENOMEM;
     }
 
@@ -160,6 +168,8 @@ static int zstd_load_dicts(void) {
             free(buf);
             fclose(f);
             free(buf);
+            fprintf(stderr, "[zstd::zstd_load_dicts] fread(%s) failed: %s\n",
+                    full, strerror(errno));
             return -EIO;
         }
         off += n;
@@ -176,6 +186,7 @@ static int zstd_load_dicts(void) {
         if (dd)
             ZSTD_freeDDict(dd);
         free(buf);
+        fprintf(stderr, "[zstd::zstd_load_dicts] contexts creation failed\n");
         return -ENOMEM; /* alloc failed */
     }
     free(buf);
@@ -201,12 +212,19 @@ static int zstd_save_dict(const void *dict, size_t dict_size,
     if (stat(dir_path, &st) == -1) {
         if (errno == ENOENT) {
             /* try to create it */
-            if (mkdir(dir_path, 0755) == -1 && errno != EEXIST)
+            if (mkdir(dir_path, 0755) == -1 && errno != EEXIST){
+                fprintf(stderr, "[zstd::zstd_save_dicts] mkdir(%s) failed: %s\n",
+                        dir_path, strerror(errno));
                 return -errno;
+            }
         } else {
+            fprintf(stderr, "[zstd::zstd_save_dicts] stat(%s) failed: %s\n",
+                    dir_path, strerror(errno));
             return -errno;                /* stat failed for other reason */
         }
     } else if (!S_ISDIR(st.st_mode)) {
+        fprintf(stderr, "[zstd::zstd_save_dicts] mkdir(%s) failed: %s\n",
+                dir_path, strerror(errno));
         return -ENOTDIR;                  /* path exists but is not a dir */
     }
     /* build path "<dir>/<id>" */
@@ -218,6 +236,8 @@ static int zstd_save_dict(const void *dict, size_t dict_size,
     int flags = O_WRONLY | O_CREAT | (overwrite ? O_TRUNC : O_EXCL);
     int fd = open(path, flags, 0644);
     if (fd == -1)
+        fprintf(stderr, "[zstd::zstd_save_dicts] open(%s) failed: %s\n",
+                path, strerror(errno));
         return -errno;
 
     const char *p = dict;
@@ -227,6 +247,8 @@ static int zstd_save_dict(const void *dict, size_t dict_size,
         if (w <= 0) {          /* error or wrote zero bytes */
             int e = errno;
             close(fd);
+            fprintf(stderr, "[zstd::zstd_save_dicts] write(%s) failed: %s\n",
+                    path, strerror(errno));
             return e ? -e : -EIO;
         }
         p      += w;
@@ -262,15 +284,17 @@ static void* trainer_main(void *arg) {
             total += n->len;
         }
         size_t *sizes = malloc(sizeof(size_t) * count);
-        void **buffs = malloc(sizeof(void*) * count);
+        char *buff = malloc(total);
         sample_node_t *n = list;
+        size_t off = 0;
         for (size_t i = 0; i < count; ++i, n = n->next) {
             sizes[i] = n->len;
-            buffs[i] = n->buf;
+            memcpy(buff + off, n->buf, n->len);
+            off += n->len;
         }
         /* train dictionary */
-        void *dict = malloc(max_dict);
-        size_t dict_sz = ZDICT_trainFromBuffer(dict, max_dict, buffs, sizes,
+        void *dict = calloc(1, max_dict);
+        size_t dict_sz = ZDICT_trainFromBuffer(dict, max_dict, buff, sizes,
                 count);
 
         if (ZSTD_isError(dict_sz)) { /* hard failure      */
@@ -350,7 +374,7 @@ static void* trainer_main(void *arg) {
             free(n);
             n = tmp;
         }
-        free(buffs);
+        free(buff);
         free(sizes);
         if (success) {
             break;
@@ -393,10 +417,6 @@ int zstd_init( const zstd_cfg_t *cfg) {
 
     /* try external dictionary first */
     int rc = zstd_load_dicts();
-    if (rc < 0) {
-        free(ctx);
-        return rc;
-    }
     if (rc == 0) {
         ctx->trainer_tid = pthread_self(); /* dummy thread ID *//* dictionary loaded → done     */
         return 0;
@@ -409,7 +429,7 @@ int zstd_init( const zstd_cfg_t *cfg) {
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
     pthread_create(&ctx->trainer_tid, &attr, trainer_main, ctx);
     pthread_attr_destroy(&attr);
-    log_rate_limited(1000000ULL, /* 1 s */
+    log_rate_limited(1000000ULL,
     "zstd-dict: trainer thread started (max_dict=%zu B)\n", ctx->cfg.max_dict);
 
     return 0;
@@ -510,7 +530,13 @@ get_cdict_by_id(uint16_t id) {
      * rotation, change this helper to do a table lookup or array index.          */
     return (id == 1) ? CDICT(ctx) : NULL;
 }
-
+ssize_t inline zstd_orig_size(const void *src, size_t comp_size){
+    /* TODO if size in available ?*/
+    return ZSTD_getFrameContentSize(src, comp_size);
+}
+static inline unsigned long long cur_tid(void) {
+    return (unsigned long long)(uintptr_t)pthread_self();
+}
 /* -----------------------------------------------------------------
  * Compress an value.
  *  • On success: returns compressed size (≥0) and sets *dict_id_out.
@@ -548,7 +574,6 @@ ssize_t zstd_maybe_compress(const void *src, size_t src_sz,
 
     if (ZSTD_isError(csz))
         return -(ssize_t)ZSTD_getErrorCode(csz);
-
     /* 4.  ratio check – skip if no benefit ----------------------- */
     if (csz >= src_sz)
         return 0;
@@ -591,10 +616,7 @@ ssize_t zstd_decompress(const void *src,
     return (ssize_t) out_sz;
 }
 
-ssize_t inline zstd_orig_size(const void *src, size_t comp_size){
-    /* TODO if size in available ?*/
-    return ZSTD_getFrameContentSize(src, comp_size);
-}
+
 
 /* Return values
  *   >0  : decompressed length
@@ -603,8 +625,11 @@ ssize_t inline zstd_orig_size(const void *src, size_t comp_size){
  */
 ssize_t zstd_maybe_decompress(const item *it, mc_resp    *resp) {
     zstd_ctx_t *ctx = zstd_ctx_mut();
-    if (!ctx || !it || !resp)
-        return -EINVAL;                  /* invalid arguments */
+    if (!ctx || !it || !resp){
+        printf("[zstd] decompress: bad args (ctx=%p it=%p resp=%p)\n",
+               (void*)ctx, (void*)it, (void*)resp);
+        return -EINVAL; /* invalid arguments */
+    }
     /* 1. Skip if not compressed or chunked ------------------------ */
      if (!(it->it_flags & ITEM_ZSTD) || (it->it_flags & ITEM_CHUNKED))
          return 0;                         /* treat as plain payload */
@@ -612,27 +637,37 @@ ssize_t zstd_maybe_decompress(const item *it, mc_resp    *resp) {
      /* 2. Dictionary lookup --------------------------------------- */
      uint16_t  did = ITEM_get_dictid(it);
      const ZSTD_DDict *dd = get_ddict_by_id(did);
-     if (!dd && did > 0)
-         return -EINVAL;                  /* unknown dict id */
+    if (!dd && did > 0){
+        printf("[zstd] decompress: unknown dict id %u\n", did);
+        return -EINVAL;                  /* unknown dict id */
+    }
 
      /* 3. Prepare destination buffer ------------------------------ */
      const void *src     = ITEM_data(it);
      size_t      compLen = it->nbytes;
 
      size_t expect = ZSTD_getFrameContentSize(src, compLen);
-     if (expect == ZSTD_CONTENTSIZE_ERROR)
-         return -EINVAL;
+    if (expect == ZSTD_CONTENTSIZE_ERROR){
+        printf("[zstd] decompress: corrupt frame (tid=%llu, id=%u, compLen=%zu, start=%llu)\n",
+               cur_tid(), did, compLen, *(uint64_t *)src);
+        return -EINVAL;
+    }
      if (expect == ZSTD_CONTENTSIZE_UNKNOWN)
          expect = compLen * 4u;           /* pessimistic */
 
      void *dst = malloc(expect);
-     if (!dst)
-         return -ENOMEM;
+    if (!dst){
+        printf("[zstd] decompress: malloc(%zu) failed: %s\n",
+                expect, strerror(errno));
+        return -ENOMEM;
+    }
 
      /* 4. Decompress ---------------------------------------------- */
      ssize_t dec = zstd_decompress(src, compLen, dst, expect, did);
 
      if (dec < 0) {                       /* ZSTD error */
+         printf("[zstd] decompress: zstd_decompress() -> %zd (id=%u)\n",
+                dec, did);
          free(dst);
          return dec;
      }
