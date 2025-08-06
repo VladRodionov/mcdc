@@ -581,8 +581,13 @@ struct settings {
     uint32_t sock_cookie_id;
 #endif
 #ifdef USE_ZSTD
-    char *zstd_dict_path;
-    //zstd_dict_t zstd_dict;
+    int      zstd_level;            /* -Zl */
+    size_t   zstd_max_dict;         /* -Zd */
+    size_t   zstd_min_train;        /* -Zt */
+    size_t   zstd_min_comp;         /* -Zn */
+    size_t   zstd_max_comp;         /* -Zx */
+    bool     zstd_compress_keys;    /* -Zk */
+    char    *zstd_dict_dir;         /* -Zp= */
 #endif
 };
 
@@ -616,8 +621,10 @@ extern struct settings settings;
 #define ITEM_STALE 2048
 /* if item key was sent in binary */
 #define ITEM_KEY_BINARY 4096
+#ifdef USE_ZSTD
 /* item is compressed with zstd */
 #define ITEM_ZSTD 8192
+#endif
 
 /**
  * Structure for storing items within memcached.

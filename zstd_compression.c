@@ -27,7 +27,7 @@ typedef struct {
 static __thread tls_cache_t tls; /* zero-initialised */
 
 /* ---------- zstd context --------------------------------------------- */
-static zstd_ctx_t g_zstd;      /* zero-init by the loader */
+zstd_ctx_t g_zstd = { 0 };      /* zero-init by the loader */
 
 /* ---------- zstd context helpers ------------------------------------ */
 const zstd_ctx_t *zstd_ctx(void)      { return &g_zstd; }
@@ -36,6 +36,80 @@ zstd_ctx_t       *zstd_ctx_mut(void)  { return &g_zstd; }
 /* ---------- helper macros ------------------------------------------- */
 #define CDICT(ctx) ((ZSTD_CDict*)atomic_load_explicit(&(ctx)->cdict, memory_order_acquire))
 #define DDICT(ctx) ((ZSTD_DDict*)atomic_load_explicit(&(ctx)->ddict, memory_order_acquire))
+
+#define KB(x)  ((size_t)(x) << 10)
+#define MB(x)  ((size_t)(x) << 20)
+
+/* sane absolute limits */
+enum {
+    ZSTD_LVL_MIN   = 1,
+    ZSTD_LVL_MAX   = 22,
+    ZSTD_DICT_MAX  = MB(1),   /* upstream hard-limit */
+    ZSTD_VALUE_MAX = KB(200),  /* arbitrary safety cap, usually must be much less*/
+    ZSTD_VALUE_MIN = 16        /* absolute min size of a value for compression */
+};
+
+int
+zstd_cfg_init(zstd_cfg_t *cfg)
+{
+    if (!cfg) return -EINVAL;
+    memset(cfg, 0, sizeof(*cfg));
+
+    /* 1. Compression level ---------------------------------------- */
+    int lvl = settings.zstd_level;          /* e.g. from -Zl <n> CL arg */
+    if (lvl == 0)                           /* 0 = default (3) */
+        lvl = 3;
+    if (lvl < ZSTD_LVL_MIN || lvl > ZSTD_LVL_MAX) {
+        fprintf(stderr,
+                "ERROR: zstd level %d out of range [%d..%d]\n",
+                lvl, ZSTD_LVL_MIN, ZSTD_LVL_MAX);
+        return -EINVAL;
+    }
+    cfg->level = lvl;
+
+    /* 2. Dictionary size ------------------------------------------ */
+    size_t dict_sz = settings.zstd_max_dict;  /* bytes from -Zd <bytes> */
+    if (dict_sz == 0) dict_sz = KB(112);      /* good default */
+    if (dict_sz > ZSTD_DICT_MAX) dict_sz = ZSTD_DICT_MAX;
+    cfg->max_dict = dict_sz;
+
+    /* 3. Training corpus threshold ( ≥ dict×100 unless overridden ) */
+    size_t mts = settings.zstd_min_train;     /* from -Zt <bytes> */
+    if (mts == 0) mts = dict_sz * 100;
+    cfg->min_train_size = mts;
+
+    /* 4. Value size bounds for compression ------------------------ */
+    cfg->min_comp_size = settings.zstd_min_comp ? settings.zstd_min_comp : ZSTD_VALUE_MIN;
+    cfg->max_comp_size = settings.zstd_max_comp
+                         ? settings.zstd_max_comp
+                         : ZSTD_VALUE_MAX;
+    if (cfg->max_comp_size >= settings.slab_chunk_size_max){
+        cfg->max_comp_size = settings.slab_chunk_size_max - 1;
+        if (cfg->max_comp_size > ZSTD_VALUE_MAX){
+            cfg->max_comp_size = ZSTD_VALUE_MAX;
+        }
+    }
+    if (cfg->min_comp_size > cfg->max_comp_size ||
+        cfg->max_comp_size > ZSTD_VALUE_MAX) {
+        fprintf(stderr,
+                "ERROR: invalid zstd min/max comp size (%zu / %zu)\n",
+                cfg->min_comp_size, cfg->max_comp_size);
+        return -EINVAL;
+    }
+
+    /* 5. Key compression flag ------------------------------------- */
+    cfg->compress_keys = settings.zstd_compress_keys;   /* bool, from -Zk */
+
+    /* 6. Dictionary directory ------------------------------------- */
+    if (settings.zstd_dict_dir && settings.zstd_dict_dir[0]) {
+        cfg->dict_dir_path = strdup(settings.zstd_dict_dir);
+        if (!cfg->dict_dir_path) return -ENOMEM;
+    } else {
+        cfg->dict_dir_path = NULL;   /* live training */
+    }
+
+    return 0;
+}
 
 static void tls_ensure(size_t need) {
     if (!tls.cctx)
@@ -395,7 +469,7 @@ static inline bool dict_is_ready(void) {
 }
 
 /* ---------- public init / destroy ----------------------------------- */
-int zstd_init( const zstd_cfg_t *cfg) {
+int zstd_init(zstd_cfg_t *cfg) {
     zstd_ctx_t *ctx = zstd_ctx_mut();
     if (!ctx)
         return -ENOMEM;

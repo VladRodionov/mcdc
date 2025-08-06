@@ -278,6 +278,15 @@ static void settings_init(void) {
 #ifdef SOCK_COOKIE_ID
     settings.sock_cookie_id = 0;
 #endif
+#ifdef USE_ZSTD
+    settings.zstd_level = 0;             /* -Zl */
+    settings.zstd_max_dict = 0;          /* -Zd */
+    settings.zstd_min_train = 0;         /* -Zt */
+    settings.zstd_min_comp = 0;          /* -Zn */
+    settings.zstd_max_comp = 0;          /* -Zx */
+    settings.zstd_compress_keys = false; /* -Zk */
+    settings.zstd_dict_dir = NULL;       /* -Zp= */
+#endif
 }
 
 extern pthread_mutex_t conn_lock;
@@ -4997,6 +5006,9 @@ int main (int argc, char **argv) {
           "e:"  /* mmap path for external item memory */
           "o:"  /* Extended generic options */
           "N:"  /* NAPI ID based thread selection */
+#ifdef USE_ZSTD
+          "z:"  /* Z compression config file path*/
+#endif
           ;
 
     /* process arguments */
@@ -5038,6 +5050,7 @@ int main (int argc, char **argv) {
         {"memory-file", required_argument, 0, 'e'},
         {"extended", required_argument, 0, 'o'},
         {"napi-ids", required_argument, 0, 'N'},
+        {"zstd-config", required_argument, 0, 'z'},
         {0, 0, 0, 0}
     };
     int optindex;
@@ -5271,6 +5284,14 @@ int main (int argc, char **argv) {
                 return 1;
             }
             break;
+#ifdef USE_ZSTD
+       case 'z' :
+            if (parse_zstd_config(optarg) != 0) {
+                fprintf(stderr, "failed to load zstd config file %s\n", optarg);
+                exit(EXIT_FAILURE);
+            }
+            break;
+#endif
         case 'o': /* It's sub-opts time! */
             subopts_orig = subopts = strdup(optarg); /* getsubopt() changes the original args */
 
@@ -6013,7 +6034,12 @@ int main (int argc, char **argv) {
     logger_create(); // main process logger
     conn_init();
 #ifdef USE_ZSTD
-    zstd_init(NULL);
+    extern zstd_ctx_t g_zstd;
+    if (zstd_cfg_init(&g_zstd.cfg) != 0) {
+        fprintf(stderr, "fatal: bad zstd configuration\n");
+        exit(EXIT_FAILURE);
+    }
+    zstd_init(&g_zstd.cfg);
 #endif
     bool reuse_mem = false;
     void *mem_base = NULL;

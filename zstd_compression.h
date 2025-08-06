@@ -11,6 +11,7 @@
 #include <zstd.h>
 #include <stdatomic.h>
 #include <pthread.h>
+#include "zstd_config.h"
 
 /* ---------- eclipse_friendly_atomic.h ------------------------------ */
 #ifdef __CDT_PARSER__
@@ -32,19 +33,6 @@
 typedef uintptr_t atomic_uintptr_t;
 #endif
 #endif
-/* -------------------------------------------------------------------- */
-
-/* User-tunable parameters */
-typedef struct {
-    int level; /* compression level (1-22), 0 = ZSTD default  */
-    size_t max_dict; /* max dictionary size, bytes (≤ 220 KB)       */
-    size_t min_train_size; /* minimum data size for dictionary training */
-    size_t min_comp_size; /* minimum value size for compression */
-    size_t max_comp_size; /* maximum value size for compression */
-    bool   compress_keys; /* compress keys (default: false) */
-    const char *dict_dir_path; /* NULL ⇒ train live, else preload file  */
-    /* Note: if dict_path is set, the trainer thread will not run. */
-} zstd_cfg_t;
 
 /* ---------- sample node ------------------------------------------------ */
 typedef struct sample_node_s {
@@ -70,7 +58,7 @@ typedef struct zstd_ctx_s {
 /* typedef struct zstd_ctx_s zstd_ctx_t;*/
 
 /* Global init / destroy */
-int zstd_init(const zstd_cfg_t *cfg);
+int zstd_init(zstd_cfg_t *cfg);
 void zstd_destroy(void);
 
 /* Fast-path API for Memcached */
@@ -109,4 +97,5 @@ ssize_t zstd_maybe_decompress(const item *it, mc_resp    *resp);
 const zstd_ctx_t *zstd_ctx(void);
 zstd_ctx_t       *zstd_ctx_mut(void);
 
+int zstd_cfg_init(zstd_cfg_t *cfg);
 #endif /* ZSTD_COMPRESSION_H */
