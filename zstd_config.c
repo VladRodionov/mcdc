@@ -59,7 +59,7 @@ int parse_zstd_config(const char *path)
         char *p = line;
         ltrim(&p);
         if (*p == '\0' || *p == '#') continue;          /* blank / comment */
-        
+
         char *eq = strchr(p, '=');
         if (!eq) {
             fprintf(stderr, "%s:%d: missing '='\n", path, ln);
@@ -72,7 +72,7 @@ int parse_zstd_config(const char *path)
         rtrim(key);
         ltrim(&val);
         rtrim(val);
-        
+
         /* --- dispatch -------------------------------------------------- */
         if (strcasecmp(key, "level") == 0) {
             char *end;

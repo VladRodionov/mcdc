@@ -1165,14 +1165,14 @@ static void process_mget_command(conn *c, token_t *tokens, const size_t ntokens)
         }
     }
 
-#ifdef USE_ZSTD
-    int nbytes = ITEM_is_zstd(it)? zstd_orig_size(ITEM_data(it), it->nbytes):it->nbytes;
-#else
-    int nbytes = it->nbytes;
-#endif
     // don't have to check result of add_iov() since the iov size defaults are
     // enough.
     if (it) {
+#ifdef USE_ZSTD
+        int nbytes = ITEM_is_zstd(it)? zstd_orig_size(ITEM_data(it), it->nbytes):it->nbytes;
+#else
+        int nbytes = it->nbytes;
+#endif
         if (of.value) {
             memcpy(p, "VA ", 3);
             p = itoa_u32(nbytes-2, p+3);
