@@ -128,6 +128,10 @@ int parse_zstd_config(const char *path)
 
         } else if (strcasecmp(key, "dict_dir_path") == 0) {
             settings.zstd_dict_dir = val? strdup(val): NULL;
+        } else if (strcasecmp(key, "disable_dict") == 0) {
+                settings.disable_dict = (strcasecmp(val, "true") == 0 ||
+                                          strcmp(val, "1") == 0 ||
+                                          strcasecmp(val, "yes") == 0);
         } else {
             fprintf(stderr, "%s:%d: unknown key '%s'\n", path, ln, key);
             /* not fatal, keep parsing */

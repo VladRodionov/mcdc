@@ -588,6 +588,7 @@ struct settings {
     size_t   zstd_max_comp;         /* -Zx */
     bool     zstd_compress_keys;    /* -Zk */
     char    *zstd_dict_dir;         /* -Zp= */
+    bool     disable_dict;
 #endif
 };
 

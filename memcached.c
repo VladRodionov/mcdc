@@ -286,6 +286,7 @@ static void settings_init(void) {
     settings.zstd_max_comp = 0;          /* -Zx */
     settings.zstd_compress_keys = false; /* -Zk */
     settings.zstd_dict_dir = NULL;       /* -Zp= */
+    settings.disable_dict = false;
 #endif
 }
 
@@ -1015,13 +1016,13 @@ void resp_add_iov_data(mc_resp *resp, item *it, int len){
     int    idx = resp->iovcnt;   /* slot we will fill            */
     size_t sz  = (size_t)len;    /* bytes that will be sent      */
     void  *ptr = ITEM_data(it);  /* default pointer              */
-
 #ifdef USE_ZSTD
+    bool bin_proto = it->nbytes == len + 2;
     /* zstd_maybe_decompress() may set resp->write_and_free            */
     ssize_t ds = zstd_maybe_decompress(it, resp);
     if (ds > 0) {                        /* success: use plain data  */
         ptr = resp->write_and_free;
-        sz  = (size_t)ds;
+        sz  = bin_proto? (size_t)ds - 2/*Do not send last \r\n*/: (size_t)ds;
     } else if (ds < 0) {                 /* decompression failed     */
         fprintf(stderr,
             "ERROR: decompression failed for item %.*s (%d B), "
@@ -1501,7 +1502,9 @@ static void complete_nread(conn *c) {
     item   *oit  = c->item;                     /* original item          */
     void   *cbuf = NULL;                        /* TLS scratch from helper*/
     uint16_t did = 0;                           /* dictionary id          */
-
+    /* We need this fro binary protocol */
+    *(ITEM_data(oit) + oit->nbytes - 2) = '\r';
+    *(ITEM_data(oit) + oit->nbytes - 1) = '\n';
     /* Try to compress -------------------------------------------------- */
     ssize_t clen = zstd_maybe_compress(ITEM_data(oit), oit->nbytes,
                                        &cbuf, &did);

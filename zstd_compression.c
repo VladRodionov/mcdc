@@ -107,7 +107,7 @@ zstd_cfg_init(zstd_cfg_t *cfg)
     } else {
         cfg->dict_dir_path = NULL;   /* live training */
     }
-
+    cfg->disable_dict = settings.disable_dict;
     return 0;
 }
 
@@ -183,11 +183,11 @@ static int str_to_u16(const char *s, uint16_t *out) {
  * ------------------------------------------------------------------- */
 static int zstd_load_dicts(void) {
     zstd_ctx_t *ctx = zstd_ctx_mut();
-    /*For testin only */
-    ctx->cfg.dict_dir_path = "/Users/vrodionov/Development/memcached/dict/airbnb";
     if (!ctx->cfg.dict_dir_path)
         return 1; /* nothing to load, continue live training */
-
+    if (ctx->cfg.disable_dict){
+        return 1;
+    }
     DIR *d = opendir(ctx->cfg.dict_dir_path);
     if (!d){
         int e = errno;
@@ -496,6 +496,9 @@ int zstd_init(zstd_cfg_t *cfg) {
         return 0;
     }
 
+    if (cfg->disable_dict) {
+        return 0;
+    }
     /* ---------------- spawn background trainer --------------------------- */
 
     pthread_attr_t attr;
@@ -645,7 +648,6 @@ ssize_t zstd_maybe_compress(const void *src, size_t src_sz,
                                    src, src_sz, cd)
         : ZSTD_compressCCtx      (tls.cctx, dst_buf, bound,
                                    src, src_sz, ctx->cfg.level);
-
     if (ZSTD_isError(csz))
         return -(ssize_t)ZSTD_getErrorCode(csz);
     /* 4.  ratio check – skip if no benefit ----------------------- */

@@ -368,8 +368,10 @@ static void complete_update_bin(conn *c) {
     /* We don't actually receive the trailing two characters in the bin
      * protocol, so we're going to just set them here */
     if ((it->it_flags & ITEM_CHUNKED) == 0) {
+#ifndef USE_ZSTD
         *(ITEM_data(it) + it->nbytes - 2) = '\r';
         *(ITEM_data(it) + it->nbytes - 1) = '\n';
+#endif
     } else {
         assert(c->ritem);
         item_chunk *ch = (item_chunk *) c->ritem;
@@ -485,7 +487,12 @@ static void process_bin_get_or_touch(conn *c, char *extbuf) {
     if (it) {
         /* the length has two unnecessary bytes ("\r\n") */
         uint16_t keylen = 0;
-        uint32_t bodylen = sizeof(rsp->message.body) + (it->nbytes - 2);
+#ifdef USE_ZSTD
+        int nbytes = ITEM_is_zstd(it)? zstd_orig_size(ITEM_data(it), it->nbytes):it->nbytes;
+#else
+        int nbytes = it->nbytes;
+#endif
+        uint32_t bodylen = sizeof(rsp->message.body) + (nbytes - 2);
 
         pthread_mutex_lock(&c->thread->stats.mutex);
         if (should_touch) {
@@ -499,14 +506,14 @@ static void process_bin_get_or_touch(conn *c, char *extbuf) {
 
         if (should_touch) {
             MEMCACHED_COMMAND_TOUCH(c->sfd, ITEM_key(it), it->nkey,
-                                    it->nbytes, ITEM_get_cas(it));
+                                    nbytes, ITEM_get_cas(it));
         } else {
             MEMCACHED_COMMAND_GET(c->sfd, ITEM_key(it), it->nkey,
-                                  it->nbytes, ITEM_get_cas(it));
+                                  nbytes, ITEM_get_cas(it));
         }
 
         if (c->cmd == PROTOCOL_BINARY_CMD_TOUCH) {
-            bodylen -= it->nbytes - 2;
+            bodylen -= nbytes - 2;
         } else if (should_return_key) {
             bodylen += nkey;
             keylen = nkey;

@@ -25,6 +25,7 @@ typedef struct {
     size_t   max_comp_size;    /* skip compression above this size       */
     bool     compress_keys;    /* true => compress keys as well          */
     const char *dict_dir_path; /* NULL ⇒ live training; else preload dir */
+    bool     disable_dict;
 } zstd_cfg_t;
 
 /* --------------------------------------------------------------------
