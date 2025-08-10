@@ -11,7 +11,7 @@ use Data::Dumper qw/Dumper/;
 my $server = new_memcached('-m 60 -o slab_reassign,slab_automove,lru_crawler,lru_maintainer,slab_automove_window=3');
 my $sock = $server->sock;
 
-my $value = "B"x11000;
+my $value = rand_bytes_no_crlf(11000);
 my $keycount = 5000;
 
 my $res;
@@ -47,7 +47,7 @@ for (1 .. $todelete) {
     cmp_ok($tries, '>', 0, 'some pages moved back to global pool');
 }
 
-$value = "B"x7000;
+$value = rand_bytes_no_crlf(7000);
 for (1 .. $keycount) {
     print $sock "set ifoo$_ 0 0 7000 noreply\r\n$value\r\n";
 }
@@ -121,7 +121,8 @@ cmp_ok($tries, '>', 0, 'reclaimed at least 50 pages before timeout');
 }
 
 # Set into an entirely new class. Overload a bit to try to cause problems.
-$value = "B"x4096;
+#$value = "B"x4096;
+$value = rand_bytes_no_crlf(4096);
 for (1 .. $keycount * 4) {
     print $sock "set jfoo$_ 0 0 4096 noreply\r\n$value\r\n";
 }

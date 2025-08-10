@@ -64,7 +64,7 @@ sub find_largest_clsid {
 # TODO: test reflocked chunked items as well
 sub test_reflocked {
     my $size = 9000;
-    my $bigdata = 'x' x $size;
+    my $bigdata = rand_bytes_no_crlf($size);	
     my $stats;
     my $count = 1;
     $stats = mem_stats($sock);
@@ -116,7 +116,7 @@ sub test_reflocked {
 # setting the expire time out a minute/hour.
 sub test_expired {
     my $size = 9000;
-    my $bigdata = 'x' x $size;
+    my $bigdata = rand_bytes_no_crlf($size);
     my $stats;
     my $count = 1;
     $stats = mem_stats($sock);
@@ -147,7 +147,7 @@ sub test_expired {
 # re-order the tests.
 sub test_locked {
     my $size = 9000;
-    my $bigdata = 'x' x $size;
+    my $bigdata = rand_bytes_no_crlf($size);
     my $stats;
     my $count = 1;
     $stats = mem_stats($sock);
@@ -265,7 +265,7 @@ sub test_chunked {
 # Fill test, no chunked items.
 sub test_fill {
     my $size = 15000;
-    my $bigdata = 'x' x $size;
+    my $bigdata = rand_bytes_no_crlf($size);
     my $stats;
     for (1 .. 10000) {
         print $sock "set bfoo$_ 0 0 $size\r\n", $bigdata, "\r\n";
@@ -276,8 +276,8 @@ sub test_fill {
 
     # fill a smaller slab too
     $size = 2000;
-    my $smalldata = 'y' x $size;
-    for (1 .. 10000) {
+    my $smalldata = rand_bytes_no_crlf($size); 
+   for (1 .. 10000) {
         print $sock "set sfoo$_ 0 0 $size\r\n", $smalldata, "\r\n";
         is(scalar <$sock>, "STORED\r\n", "stored small key");
         my $nstats = mem_stats($sock);

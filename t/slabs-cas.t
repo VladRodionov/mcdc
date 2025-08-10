@@ -17,7 +17,8 @@ my $sock = $server->sock;
 
 my $keycount = 60;
 # Fill a largeish slab until it evicts (honors the -m)
-my $bigdata = 'x' x 70000;
+
+my $bigdata = rand_bytes_no_crlf(70000);
 for (1 .. $keycount) {
     print $sock "set bfoo$_ 0 0 70000\r\n", $bigdata, "\r\n";
     is(scalar <$sock>, "STORED\r\n", "stored key");
