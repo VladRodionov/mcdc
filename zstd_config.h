@@ -26,6 +26,7 @@ typedef struct {
     bool     compress_keys;    /* true => compress keys as well          */
     const char *dict_dir_path; /* NULL ⇒ live training; else preload dir */
     bool     disable_dict;
+    bool     disable_comp;
 } zstd_cfg_t;
 
 /* --------------------------------------------------------------------

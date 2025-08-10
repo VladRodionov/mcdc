@@ -287,6 +287,7 @@ static void settings_init(void) {
     settings.zstd_compress_keys = false; /* -Zk */
     settings.zstd_dict_dir = NULL;       /* -Zp= */
     settings.disable_dict = false;
+    settings.disable_comp = false;
 #endif
 }
 
@@ -1481,6 +1482,10 @@ static inline bool is_zstd_not_supported_cmd(conn *c) {
         return true; // unknown protocol, assume not supported.
 }
 
+static inline bool maybe_apply_compression(conn *c){
+    item *it = c->item;
+    return !is_zstd_not_supported_cmd(c) && (it->it_flags & ITEM_CHUNKED) == 0;
+}
 #endif // USE_ZSTD
 
 static void complete_nread(conn *c) {
@@ -1493,7 +1498,13 @@ static void complete_nread(conn *c) {
     assert(c->protocol == ascii_prot || c->protocol == binary_prot);
 #endif
 #ifdef USE_ZSTD
-    if (!is_zstd_not_supported_cmd(c)) {
+    /* We need this for binary protocol */
+    item *i = c->item;
+    if ((i->it_flags & ITEM_CHUNKED) == 0) {
+        *(ITEM_data(i) + i->nbytes - 2) = '\r';
+        *(ITEM_data(i) + i->nbytes - 1) = '\n';
+    }
+    if (maybe_apply_compression(c)) {
     /* If we get here, we have a valid item to compress.
     * c->item is set by the command handler, so we can use it.
     * If the item is not compressed, it will be left as-is.
@@ -1502,9 +1513,7 @@ static void complete_nread(conn *c) {
     item   *oit  = c->item;                     /* original item          */
     void   *cbuf = NULL;                        /* TLS scratch from helper*/
     uint16_t did = 0;                           /* dictionary id          */
-    /* We need this fro binary protocol */
-    *(ITEM_data(oit) + oit->nbytes - 2) = '\r';
-    *(ITEM_data(oit) + oit->nbytes - 1) = '\n';
+
     /* Try to compress -------------------------------------------------- */
     ssize_t clen = zstd_maybe_compress(ITEM_data(oit), oit->nbytes,
                                        &cbuf, &did);
@@ -6036,14 +6045,7 @@ int main (int argc, char **argv) {
     logger_init();
     logger_create(); // main process logger
     conn_init();
-#ifdef USE_ZSTD
-    extern zstd_ctx_t g_zstd;
-    if (zstd_cfg_init(&g_zstd.cfg) != 0) {
-        fprintf(stderr, "fatal: bad zstd configuration\n");
-        exit(EXIT_FAILURE);
-    }
-    zstd_init(&g_zstd.cfg);
-#endif
+
     bool reuse_mem = false;
     void *mem_base = NULL;
     bool prefill = false;
@@ -6087,7 +6089,14 @@ int main (int argc, char **argv) {
         prefill = true;
     }
 #endif
-
+#ifdef USE_ZSTD
+    extern zstd_ctx_t g_zstd;
+    if (zstd_cfg_init(&g_zstd.cfg) != 0) {
+        fprintf(stderr, "fatal: bad zstd configuration\n");
+        exit(EXIT_FAILURE);
+    }
+    zstd_init(&g_zstd.cfg);
+#endif
     if (settings.drop_privileges) {
         setup_privilege_violations_handler();
     }

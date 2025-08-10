@@ -589,6 +589,7 @@ struct settings {
     bool     zstd_compress_keys;    /* -Zk */
     char    *zstd_dict_dir;         /* -Zp= */
     bool     disable_dict;
+    bool     disable_comp;
 #endif
 };
 

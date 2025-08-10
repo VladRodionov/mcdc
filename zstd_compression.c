@@ -49,6 +49,13 @@ enum {
     ZSTD_VALUE_MIN = 16        /* absolute min size of a value for compression */
 };
 
+#ifdef EXTSTORE
+extern void *ext_storage;  // defined in memcached.c
+static inline bool extstore_enabled_global(void) {
+    return ext_storage != NULL;
+}
+#endif
+
 int
 zstd_cfg_init(zstd_cfg_t *cfg)
 {
@@ -89,6 +96,17 @@ zstd_cfg_init(zstd_cfg_t *cfg)
             cfg->max_comp_size = ZSTD_VALUE_MAX;
         }
     }
+#ifdef EXTSTORE
+    if (extstore_enabled_global() && cfg->max_comp_size >= settings.ext_item_size - 3){
+        cfg->max_comp_size = settings.ext_item_size - 3;
+    }
+    if (cfg->min_comp_size >= cfg->max_comp_size){
+        cfg->disable_comp = true;
+        fprintf(stderr,
+                "Disable zstd min/max comp size mismatch (%zu / %zu)\n",
+                cfg->min_comp_size, cfg->max_comp_size);
+    }
+#else
     if (cfg->min_comp_size > cfg->max_comp_size ||
         cfg->max_comp_size > ZSTD_VALUE_MAX) {
         fprintf(stderr,
@@ -96,6 +114,7 @@ zstd_cfg_init(zstd_cfg_t *cfg)
                 cfg->min_comp_size, cfg->max_comp_size);
         return -EINVAL;
     }
+#endif
 
     /* 5. Key compression flag ------------------------------------- */
     cfg->compress_keys = settings.zstd_compress_keys;   /* bool, from -Zk */
@@ -473,6 +492,9 @@ int zstd_init(zstd_cfg_t *cfg) {
     zstd_ctx_t *ctx = zstd_ctx_mut();
     if (!ctx)
         return -ENOMEM;
+    if (ctx->cfg.disable_comp){
+        return 0;
+    }
     /* 1. configuration */
     ctx->cfg = cfg ? *cfg : (zstd_cfg_t ) { .level = 3, .max_dict = 110 * 1024,
                              .min_train_size = 110 * 1024 * 100,
@@ -623,7 +645,9 @@ ssize_t zstd_maybe_compress(const void *src, size_t src_sz,
                     void **dst, uint16_t *dict_id_out)
 {
     zstd_ctx_t *ctx = zstd_ctx_mut();          /* global-static instance */
-
+    if (ctx->cfg.disable_comp){
+        return 0;
+    }
     /* 0.  sanity checks ------------------------------------------ */
     if (!ctx || !src || src_sz == 0 || !dst || !dict_id_out)
         return -EINVAL;
