@@ -8,7 +8,8 @@ use MemcachedTest;
 
 my $server = new_memcached("-m 3");
 my $sock = $server->sock;
-my $value = "B"x66560;
+#my $value = "B"x66560;
+my $value = rand_bytes_no_crlf(66560);
 my $key = 0;
 
 for ($key = 0; $key < 40; $key++) {

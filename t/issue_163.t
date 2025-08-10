@@ -8,8 +8,9 @@ use MemcachedTest;
 
 my $server = new_memcached();
 my $sock = $server->sock;
-my $value1 = "A"x66560;
-my $value2 = "B"x66570;
+
+my $value1 = rand_bytes_no_crlf(66560);
+my $value2 = rand_bytes_no_crlf(66570);
 
 print $sock "set key 0 1 66560\r\n$value1\r\n";
 is (scalar <$sock>, "STORED\r\n", "stored key");
