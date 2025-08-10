@@ -113,7 +113,7 @@ if ($res eq "STORED\r\n") {
 # fill to evictions, then enable watcher, set again, and look for both lines
 
 {
-    my $value = "B"x11000;
+    my $value = rand_bytes_no_crlf(11000);
     my $keycount = 8000;
 
     for (1 .. $keycount) {
