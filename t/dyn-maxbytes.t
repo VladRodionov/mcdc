@@ -9,7 +9,8 @@ use MemcachedTest;
 
 my $server = new_memcached("-m 3 -o modern,slab_automove_window=3");
 my $sock = $server->sock;
-my $value = "B"x66560;
+#my $value = "B"x66560;
+my $value = rand_bytes_no_crlf(66560);
 my $key = 0;
 
 # These aren't set to expire.

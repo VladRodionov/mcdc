@@ -18,7 +18,7 @@ my @unixsockets = ();
              mem_get_is mem_gets mem_gets_is mem_stats mem_move_time
              supports_sasl free_port supports_drop_priv supports_extstore
              wait_ext_flush supports_tls enabled_tls_testing run_help
-             supports_unix_socket get_memcached_exe supports_proxy);
+             supports_unix_socket get_memcached_exe supports_proxy rand_bytes_no_crlf);
 
 use constant MAX_READ_WRITE_SIZE => 16384;
 use constant SRV_CRT => "server_crt.pem";
@@ -34,6 +34,31 @@ my $server_crt = $testdir . SRV_CRT;
 my $server_key = $testdir . SRV_KEY;
 
 my $tls_checked = 0;
+
+# Return a string of length N composed of high-entropy bytes
+# with CR/LF removed (so it's safe to embed between \r\n delimiters).
+sub rand_bytes_no_crlf {
+    my ($n) = @_;
+    my $buf = '';
+
+    # Try /dev/urandom for speed/entropy, fall back to perl rand()
+    if (open my $fh, '<:raw', '/dev/urandom') {
+        read($fh, $buf, $n);
+        close $fh;
+        # Replace any CR/LF that slipped in (cheap and deterministic)
+        $buf =~ tr/\r\n/AA/;
+        return $buf;
+    }
+
+    # Fallback: perl PRNG; avoid CR(13)/LF(10)
+    my $s = '';
+    for (1..$n) {
+        my $c;
+        do { $c = int(rand(256)); } while ($c == 13 || $c == 10);
+        $s .= chr($c);
+    }
+    return $s;
+}
 
 sub sleep {
     my $n = shift;
