@@ -36,7 +36,7 @@ sleep 3;
     is($stats->{reclaimed}, 10, "expired key automatically reclaimed");
 }
 
-my $value = "B"x66560;
+my $value = rand_bytes_no_crlf(66560);
 
 print $sock "set canary 0 0 66560\r\n$value\r\n";
 is(scalar <$sock>, "STORED\r\n", "stored canary key");
