@@ -64,7 +64,7 @@ sub find_largest_clsid {
 # TODO: test reflocked chunked items as well
 sub test_reflocked {
     my $size = 9000;
-    my $bigdata = rand_bytes_no_crlf($size);	
+    my $bigdata = rand_bytes_no_crlf($size);
     my $stats;
     my $count = 1;
     $stats = mem_stats($sock);
@@ -276,7 +276,7 @@ sub test_fill {
 
     # fill a smaller slab too
     $size = 2000;
-    my $smalldata = rand_bytes_no_crlf($size); 
+    my $smalldata = rand_bytes_no_crlf($size);
    for (1 .. 10000) {
         print $sock "set sfoo$_ 0 0 $size\r\n", $smalldata, "\r\n";
         is(scalar <$sock>, "STORED\r\n", "stored small key");

@@ -67,7 +67,8 @@ zstd_cfg_init(zstd_cfg_t *cfg)
     if (lvl == 0)                           /* 0 = default (3) */
         lvl = 3;
     if (lvl < ZSTD_LVL_MIN || lvl > ZSTD_LVL_MAX) {
-        fprintf(stderr,
+        if (settings.verbose > 1)
+            fprintf(stderr,
                 "ERROR: zstd level %d out of range [%d..%d]\n",
                 lvl, ZSTD_LVL_MIN, ZSTD_LVL_MAX);
         return -EINVAL;
@@ -102,14 +103,16 @@ zstd_cfg_init(zstd_cfg_t *cfg)
     }
     if (cfg->min_comp_size >= cfg->max_comp_size){
         cfg->disable_comp = true;
-        fprintf(stderr,
+        if (settings.verbose > 1)
+            fprintf(stderr,
                 "Disable zstd min/max comp size mismatch (%zu / %zu)\n",
                 cfg->min_comp_size, cfg->max_comp_size);
     }
 #else
     if (cfg->min_comp_size > cfg->max_comp_size ||
         cfg->max_comp_size > ZSTD_VALUE_MAX) {
-        fprintf(stderr,
+        if (settings.verbose > 1)
+            fprintf(stderr,
                 "ERROR: invalid zstd min/max comp size (%zu / %zu)\n",
                 cfg->min_comp_size, cfg->max_comp_size);
         return -EINVAL;
@@ -210,7 +213,8 @@ static int zstd_load_dicts(void) {
     DIR *d = opendir(ctx->cfg.dict_dir_path);
     if (!d){
         int e = errno;
-        fprintf(stderr, "[zstd::zstd_load_dicts] opendir(%s) failed: %s\n",
+        if (settings.verbose > 1)
+            fprintf(stderr, "[zstd::zstd_load_dicts] opendir(%s) failed: %s\n",
                 ctx->cfg.dict_dir_path, strerror(e));
         return -e;           /* or handle specifically */
     }
@@ -235,7 +239,8 @@ static int zstd_load_dicts(void) {
     /* read file */
     FILE *f = fopen(full, "rb");
     if (!f)
-        fprintf(stderr, "[zstd::zstd_load_dicts] fopen(%s) failed: %s\n",
+        if (settings.verbose > 1)
+            fprintf(stderr, "[zstd::zstd_load_dicts] fopen(%s) failed: %s\n",
                 full, strerror(errno));
         return -errno; /* I/O error */
 
@@ -261,7 +266,8 @@ static int zstd_load_dicts(void) {
             free(buf);
             fclose(f);
             free(buf);
-            fprintf(stderr, "[zstd::zstd_load_dicts] fread(%s) failed: %s\n",
+            if (settings.verbose > 1)
+                fprintf(stderr, "[zstd::zstd_load_dicts] fread(%s) failed: %s\n",
                     full, strerror(errno));
             return -EIO;
         }
@@ -279,7 +285,8 @@ static int zstd_load_dicts(void) {
         if (dd)
             ZSTD_freeDDict(dd);
         free(buf);
-        fprintf(stderr, "[zstd::zstd_load_dicts] contexts creation failed\n");
+        if (settings.verbose > 1)
+            fprintf(stderr, "[zstd::zstd_load_dicts] contexts creation failed\n");
         return -ENOMEM; /* alloc failed */
     }
     free(buf);
@@ -306,17 +313,20 @@ static int zstd_save_dict(const void *dict, size_t dict_size,
         if (errno == ENOENT) {
             /* try to create it */
             if (mkdir(dir_path, 0755) == -1 && errno != EEXIST){
-                fprintf(stderr, "[zstd::zstd_save_dicts] mkdir(%s) failed: %s\n",
+                if (settings.verbose > 1)
+                    fprintf(stderr, "[zstd::zstd_save_dicts] mkdir(%s) failed: %s\n",
                         dir_path, strerror(errno));
                 return -errno;
             }
         } else {
-            fprintf(stderr, "[zstd::zstd_save_dicts] stat(%s) failed: %s\n",
+            if (settings.verbose > 1)
+                fprintf(stderr, "[zstd::zstd_save_dicts] stat(%s) failed: %s\n",
                     dir_path, strerror(errno));
             return -errno;                /* stat failed for other reason */
         }
     } else if (!S_ISDIR(st.st_mode)) {
-        fprintf(stderr, "[zstd::zstd_save_dicts] mkdir(%s) failed: %s\n",
+        if (settings.verbose > 1)
+            fprintf(stderr, "[zstd::zstd_save_dicts] mkdir(%s) failed: %s\n",
                 dir_path, strerror(errno));
         return -ENOTDIR;                  /* path exists but is not a dir */
     }
@@ -329,7 +339,8 @@ static int zstd_save_dict(const void *dict, size_t dict_size,
     int flags = O_WRONLY | O_CREAT | (overwrite ? O_TRUNC : O_EXCL);
     int fd = open(path, flags, 0644);
     if (fd == -1)
-        fprintf(stderr, "[zstd::zstd_save_dicts] open(%s) failed: %s\n",
+        if (settings.verbose > 1)
+            fprintf(stderr, "[zstd::zstd_save_dicts] open(%s) failed: %s\n",
                 path, strerror(errno));
         return -errno;
 
@@ -340,7 +351,8 @@ static int zstd_save_dict(const void *dict, size_t dict_size,
         if (w <= 0) {          /* error or wrote zero bytes */
             int e = errno;
             close(fd);
-            fprintf(stderr, "[zstd::zstd_save_dicts] write(%s) failed: %s\n",
+            if (settings.verbose > 1)
+                fprintf(stderr, "[zstd::zstd_save_dicts] write(%s) failed: %s\n",
                     path, strerror(errno));
             return e ? -e : -EIO;
         }
@@ -391,13 +403,15 @@ static void* trainer_main(void *arg) {
                 count);
 
         if (ZSTD_isError(dict_sz)) { /* hard failure      */
-            log_rate_limited(10 * 1000000ULL, /* 10 s */
-            "zstd-dict: TRAIN ERROR %s (samples=%zu, bytes=%zu)\n",
+            if (settings.verbose > 1)
+                log_rate_limited(10 * 1000000ULL, /* 10 s */
+                "zstd-dict: TRAIN ERROR %s (samples=%zu, bytes=%zu)\n",
                     ZSTD_getErrorName(dict_sz), count, total);
             atomic_fetch_add_explicit(&zstd_stats.train_err, 1,
                     memory_order_relaxed);
         } else if (dict_sz < 1024) { /* too small         */
-            log_rate_limited(10 * 1000000ULL,
+            if (settings.verbose > 1)
+                log_rate_limited(10 * 1000000ULL,
                     "zstd-dict: dict too small (%zu B, need ≥1 KiB)\n",
                     dict_sz);
             atomic_fetch_add_explicit(&zstd_stats.train_small, 1,
@@ -432,22 +446,24 @@ static void* trainer_main(void *arg) {
                 if (new_id == 0) new_id = 1;        /* wrap 0xFFFF → 1 */
                 atomic_store_explicit(&ctx->cur_dict_id, new_id, memory_order_release);
                 atomic_store_explicit(&ctx->dict_ready, true, memory_order_release);
-                log_rate_limited(1000000ULL, /* 1 s */
-                "zstd-dict: new dict %u (%zu B) built from %zu samples\n",
+                if (settings.verbose > 1)
+                    log_rate_limited(1000000ULL, /* 1 s */
+                    "zstd-dict: new dict %u (%zu B) built from %zu samples\n",
                         new_id, dict_sz, count);
                 atomic_fetch_add_explicit(&zstd_stats.train_ok, 1,
                         memory_order_relaxed);
                 /* OPTIONAL: save the raw dictionary bytes for future cold-start */
                 if (ctx->cfg.dict_dir_path) { /* reuse same path or another config field */
                     int rc = zstd_save_dict(dict, dict_sz, new_id, true);
-                    if (rc)
+                    if (rc && settings.verbose > 1)
                         log_rate_limited(10 * 1000000ULL,
                                 "zstd-dict: could not save dict (%s): %s\n",
                                 ctx->cfg.dict_dir_path, strerror(-rc));
                 }
                 success = true;
             } else {
-                log_rate_limited(10 * 1000000ULL,
+                if (settings.verbose > 1)
+                    log_rate_limited(10 * 1000000ULL,
                         "zstd-dict: CDict/DDict alloc failed\n");
                 atomic_fetch_add_explicit(&zstd_stats.train_err, 1,
                         memory_order_relaxed);
@@ -528,9 +544,9 @@ int zstd_init(zstd_cfg_t *cfg) {
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
     pthread_create(&ctx->trainer_tid, &attr, trainer_main, ctx);
     pthread_attr_destroy(&attr);
-    log_rate_limited(1000000ULL,
-    "zstd-dict: trainer thread started (max_dict=%zu B)\n", ctx->cfg.max_dict);
-
+    if (settings.verbose > 1)
+        log_rate_limited(1000000ULL,
+        "zstd-dict: trainer thread started (max_dict=%zu B)\n", ctx->cfg.max_dict);
     return 0;
 }
 
@@ -726,7 +742,8 @@ ssize_t zstd_decompress(const void *src,
 ssize_t zstd_maybe_decompress(const item *it, mc_resp    *resp) {
     zstd_ctx_t *ctx = zstd_ctx_mut();
     if (!ctx || !it || !resp){
-        printf("[zstd] decompress: bad args (ctx=%p it=%p resp=%p)\n",
+        
+        fprintf(stderr, "[zstd] decompress: bad args (ctx=%p it=%p resp=%p)\n",
                (void*)ctx, (void*)it, (void*)resp);
         return -EINVAL; /* invalid arguments */
     }
@@ -738,7 +755,7 @@ ssize_t zstd_maybe_decompress(const item *it, mc_resp    *resp) {
      uint16_t  did = ITEM_get_dictid(it);
      const ZSTD_DDict *dd = get_ddict_by_id(did);
     if (!dd && did > 0){
-        printf("[zstd] decompress: unknown dict id %u\n", did);
+        fprintf(stderr, "[zstd] decompress: unknown dict id %u\n", did);
         return -EINVAL;                  /* unknown dict id */
     }
 
@@ -748,7 +765,7 @@ ssize_t zstd_maybe_decompress(const item *it, mc_resp    *resp) {
 
      size_t expect = ZSTD_getFrameContentSize(src, compLen);
     if (expect == ZSTD_CONTENTSIZE_ERROR){
-        printf("[zstd] decompress: corrupt frame (tid=%llu, id=%u, compLen=%zu, start=%llu)\n",
+        fprintf(stderr, "[zstd] decompress: corrupt frame (tid=%llu, id=%u, compLen=%zu, start=%llu)\n",
                cur_tid(), did, compLen, *(uint64_t *)src);
         return -EINVAL;
     }
@@ -757,7 +774,7 @@ ssize_t zstd_maybe_decompress(const item *it, mc_resp    *resp) {
 
      void *dst = malloc(expect);
     if (!dst){
-        printf("[zstd] decompress: malloc(%zu) failed: %s\n",
+        fprintf(stderr,"[zstd] decompress: malloc(%zu) failed: %s\n",
                 expect, strerror(errno));
         return -ENOMEM;
     }
@@ -766,7 +783,7 @@ ssize_t zstd_maybe_decompress(const item *it, mc_resp    *resp) {
      ssize_t dec = zstd_decompress(src, compLen, dst, expect, did);
 
      if (dec < 0) {                       /* ZSTD error */
-         printf("[zstd] decompress: zstd_decompress() -> %zd (id=%u)\n",
+         fprintf(stderr, "[zstd] decompress: zstd_decompress() -> %zd (id=%u)\n",
                 dec, did);
          free(dst);
          return dec;
