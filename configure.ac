@@ -502,6 +502,10 @@ else
   fi
 fi
 
+dnl Check if we need -lm for log()/friends
+AC_CHECK_LIB([m], [log], [LIBM='-lm'], [LIBM=''])
+AC_SUBST([LIBM])
+
 AC_SUBST([ZSTD_CFLAGS])
 AC_SUBST([ZSTD_LIBS])
 AM_CONDITIONAL([HAVE_ZSTD], [test "x$have_zstd" = "xyes"])

@@ -10,6 +10,7 @@ timedrun_SOURCES = timedrun.c
 
 memcached_SOURCES = memcached.c memcached.h \
                     zstd_compression.c zstd_compression.h zstd_config.c zstd_config.h \
+                    mcz_incompressible.h mcz_incompressible.c \
                     hash.c hash.h \
                     jenkins_hash.c jenkins_hash.h \
                     murmur3_hash.c murmur3_hash.h \
@@ -102,8 +103,8 @@ CLEANFILES=
 if HAVE_ZSTD
  memcached_CPPFLAGS += @ZSTD_CFLAGS@ -DUSE_ZSTD  
  memcached_debug_CFLAGS +=  @ZSTD_CFLAGS@ -DUSE_ZSTD
- memcached_LDADD += @ZSTD_LIBS@
- memcached_debug_LDADD += @ZSTD_LIBS@
+ memcached_LDADD += @ZSTD_LIBS@ @LIBM@
+ memcached_debug_LDADD += @ZSTD_LIBS@ @LIBM@
 endif
 
 if BUILD_LINUX_PRIVS
