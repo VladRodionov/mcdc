@@ -1,6 +1,8 @@
 /* -*- Mode: C; tab-width: 4; c-basic-offset: 4; indent-tabs-mode: nil -*- */
 #include "memcached.h"
-#include "zstd_compression.h"
+#ifdef USE_ZSTD
+#include "mcz_compression.h"
+#endif
 #include <zstd.h>
 #include "bipbuffer.h"
 #include "storage.h"

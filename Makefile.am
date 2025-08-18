@@ -9,7 +9,7 @@ testapp_SOURCES = testapp.c util.c util.h stats_prefix.c stats_prefix.h jenkins_
 timedrun_SOURCES = timedrun.c
 
 memcached_SOURCES = memcached.c memcached.h \
-                    zstd_compression.c zstd_compression.h zstd_config.c zstd_config.h \
+                    mcz_compression.c mcz_compression.h mcz_config.c mcz_config.h \
                     mcz_incompressible.h mcz_incompressible.c \
                     hash.c hash.h \
                     jenkins_hash.c jenkins_hash.h \

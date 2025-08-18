@@ -11,12 +11,8 @@
 #include <zstd.h>
 #include <stdatomic.h>
 #include <pthread.h>
-#include "zstd_config.h"
+#include "mcz_config.h"
 
-/* ---------- eclipse_friendly_atomic.h ------------------------------ */
-#ifdef __CDT_PARSER__
-#define _Atomic(T)  T          /* strip for CDT indexer */
-#endif
 /* ---------- portable atomic_uintptr_t --------------------------------- */
 #if defined(__STDC_NO_ATOMICS__)
     /* compiler has no C11 atomics at all */

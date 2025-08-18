@@ -7,7 +7,7 @@
 #include <string.h>
 
 #include "memcached.h"                  /* settings, zstd_cfg_t          */
-#include "zstd_config.h"
+#include "mcz_config.h"
 
 static void ltrim(char **s)
 {

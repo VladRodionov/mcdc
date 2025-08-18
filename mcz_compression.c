@@ -1,4 +1,4 @@
-#include "zstd_compression.h"
+#include "mcz_compression.h"
 
 #include <pthread.h>
 #include <stdio.h>          /* FILE, fopen, fread, fclose */
