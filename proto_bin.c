@@ -488,7 +488,7 @@ static void process_bin_get_or_touch(conn *c, char *extbuf) {
         /* the length has two unnecessary bytes ("\r\n") */
         uint16_t keylen = 0;
 #ifdef USE_ZSTD
-        int nbytes = ITEM_is_zstd(it)? zstd_orig_size(ITEM_data(it), it->nbytes):it->nbytes;
+        int nbytes = ITEM_is_zstd(it)? mcz_orig_size(ITEM_data(it), it->nbytes):it->nbytes;
 #else
         int nbytes = it->nbytes;
 #endif

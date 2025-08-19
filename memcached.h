@@ -581,15 +581,38 @@ struct settings {
     uint32_t sock_cookie_id;
 #endif
 #ifdef USE_ZSTD
-    int      zstd_level;            /* -Zl */
-    size_t   zstd_max_dict;         /* -Zd */
-    size_t   zstd_min_train;        /* -Zt */
-    size_t   zstd_min_comp;         /* -Zn */
-    size_t   zstd_max_comp;         /* -Zx */
-    bool     zstd_compress_keys;    /* -Zk */
-    char    *zstd_dict_dir;         /* -Zp= */
-    bool     disable_dict;
-    bool     disable_comp;
+    // Core
+    bool     mcz_enable_comp;           // default true
+    bool     mcz_enable_dict;           // default true
+    char    *mcz_dict_dir;              // path
+    size_t   mcz_dict_size;             // bytes (target dict size)
+    int      zstd_level;                // reuse existing
+    size_t   mcz_min_size;              // compress if >=
+    size_t   mcz_max_size;              // compress if <=
+    double   mcz_min_savings;           // 0..1 (skip if below)
+    char    *mcz_dict_map;              // path (prefix->dict map)
+    bool     mcz_compress_keys;         // compress key (false, not implemented yet)
+
+    // Training
+    bool     mcz_enable_training;       // enable online training
+    int64_t  mcz_retraining_interval_s; // seconds
+    size_t   mcz_min_training_size;     // bytes of eligible data since last train
+    double   mcz_ewma_alpha;            // 0..1
+    double   mcz_retrain_drop;          // 0..1
+
+    // Retention
+    int      mcz_dict_retain_hours;     // keep dicts <= N hours
+    int      mcz_dict_retain_max;       // cap count of resident old dicts
+
+    // Sampling + Spool
+    bool     mcz_enable_sampling;       // enable sample spooling
+    double   mcz_sample_p;              // 0..1
+    int      mcz_sample_window_sec;     // seconds
+    size_t   mcz_sample_roll_bytes;     // rotate when >=
+    char    *mcz_spool_dir;             // path
+    size_t   mcz_spool_max_bytes;       // cap; drop-oldest windows
+    enum { MCZ_KEYMODE_RAW=0, MCZ_KEYMODE_PREFIX=1, MCZ_KEYMODE_HASH=2 } mcz_sample_key_mode;
+    int      mcz_sample_prefix_n;       // valid if KEYMODE_PREFIX
 #endif
 };
 

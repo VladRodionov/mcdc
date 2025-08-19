@@ -1,5 +1,5 @@
-#ifndef ZSTD_COMPRESSION_H
-#define ZSTD_COMPRESSION_H
+#ifndef MCZ_COMPRESSION_H
+#define MCZ_COMPRESSION_H
 
 #include <stdio.h>
 #include <stddef.h>
@@ -38,7 +38,7 @@ typedef struct sample_node_s {
 } sample_node_t;
 
 /* ---------- global context -------------------------------------------- */
-typedef struct zstd_ctx_s {
+typedef struct mcz_ctx_s {
     _Atomic(sample_node_t *) samples_head; /* MPSC list head (push-only) */
     _Atomic(size_t) bytes_pending; /* atomically updated         */
     _Atomic(bool) dict_ready; /* set exactly once by trainer   */
@@ -47,34 +47,34 @@ typedef struct zstd_ctx_s {
     atomic_uintptr_t cdict; /* current compression dictionary */
     atomic_uintptr_t ddict; /* current decompression dictionary */
     pthread_t trainer_tid;
-    zstd_cfg_t cfg;
-} zstd_ctx_t;
+    mcz_cfg_t cfg;
+} mcz_ctx_t;
 
 /* Opaque context handle */
-/* typedef struct zstd_ctx_s zstd_ctx_t;*/
+/* typedef struct mcz_ctx_s mcz_ctx_t;*/
 
 /* Global init / destroy */
-int zstd_init(zstd_cfg_t *cfg);
-void zstd_destroy(void);
+int mcz_init(mcz_cfg_t *cfg);
+void mcz_destroy(void);
 
 /* Fast-path API for Memcached */
 
-ssize_t zstd_decompress(const void *src,
+ssize_t mcz_decompress(const void *src,
         size_t src_size, void *dst, size_t dst_sz, uint16_t dict_id);
-ssize_t zstd_maybe_compress(const void *src, size_t src_sz,
+ssize_t mcz_maybe_compress(const void *src, size_t src_sz,
                     void **dst, uint16_t *dict_id_out);
-ssize_t zstd_orig_size(const void *src, size_t comp_size);
+ssize_t mcz_orig_size(const void *src, size_t comp_size);
 /* Feed raw samples for future dictionary training */
-void zstd_sample(const void *buf, size_t len);
+void mcz_sample(const void *buf, size_t len);
 
 /* =======================  NEW STATS SECTION  ========================= */
 typedef struct {
     _Atomic(uint64_t) train_ok; /* dictionaries successfully built     */
     _Atomic(uint64_t) train_small; /* dict < 1 KiB                        */
     _Atomic(uint64_t) train_err; /* ZDICT_trainFromBuffer() errors      */
-} zstd_stats_t;
+} mcz_stats_t;
 
-void zstd_get_stats(zstd_stats_t *out);
+void mcz_get_stats(mcz_stats_t *out);
 
 
 /* forward declarations – no memcached.h needed here */
@@ -88,10 +88,10 @@ typedef struct _mc_resp mc_resp;  /* defined in memcached.c */
  *    0  : either ITEM_ZSTD flag not set  *or*  item is chunked
  *   <0  : negative errno / ZSTD error code
  */
-ssize_t zstd_maybe_decompress(const item *it, mc_resp    *resp);
+ssize_t mcz_maybe_decompress(const item *it, mc_resp    *resp);
 
-const zstd_ctx_t *zstd_ctx(void);
-zstd_ctx_t       *zstd_ctx_mut(void);
+const mcz_ctx_t *mcz_ctx(void);
+mcz_ctx_t       *mcz_ctx_mut(void);
 
-int zstd_cfg_init(zstd_cfg_t *cfg);
-#endif /* ZSTD_COMPRESSION_H */
+int mcz_cfg_init(mcz_cfg_t *cfg);
+#endif /* MCZ_COMPRESSION_H */

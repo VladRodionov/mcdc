@@ -279,15 +279,35 @@ static void settings_init(void) {
     settings.sock_cookie_id = 0;
 #endif
 #ifdef USE_ZSTD
-    settings.zstd_level = 0;             /* -Zl */
-    settings.zstd_max_dict = 0;          /* -Zd */
-    settings.zstd_min_train = 0;         /* -Zt */
-    settings.zstd_min_comp = 0;          /* -Zn */
-    settings.zstd_max_comp = 0;          /* -Zx */
-    settings.zstd_compress_keys = false; /* -Zk */
-    settings.zstd_dict_dir = NULL;       /* -Zp= */
-    settings.disable_dict = false;
-    settings.disable_comp = false;
+    settings.mcz_enable_comp = true;
+    settings.mcz_enable_dict = true;
+    settings.mcz_dict_dir = NULL;
+    settings.mcz_dict_size = 256*1024;
+    settings.zstd_level = 3;
+    settings.mcz_min_size = 32;
+    settings.mcz_max_size = 32*1024;
+    settings.mcz_min_savings = 0.05;
+    settings.mcz_dict_map = NULL;
+
+    settings.mcz_enable_training = true;
+    settings.mcz_retraining_interval_s = 90*60;
+    settings.mcz_min_training_size = 64*1024*1024;
+    settings.mcz_ewma_alpha = 0.20;
+    settings.mcz_retrain_drop = 0.12;
+
+    settings.mcz_dict_retain_hours = 24;
+    settings.mcz_dict_retain_max = 8;
+
+    settings.mcz_enable_sampling = true;
+    settings.mcz_sample_p = 0.02;
+    settings.mcz_sample_window_sec = 300;
+    settings.mcz_sample_roll_bytes = 32*1024*1024;
+    settings.mcz_spool_dir = NULL;
+    settings.mcz_spool_max_bytes = 4ULL*1024*1024*1024;
+    settings.mcz_sample_key_mode = MCZ_KEYMODE_PREFIX;
+    settings.mcz_sample_prefix_n = 16;
+    settings.mcz_compress_keys = false; /* -Zk */
+
 #endif
 }
 
@@ -1019,8 +1039,8 @@ void resp_add_iov_data(mc_resp *resp, item *it, int len){
     void  *ptr = ITEM_data(it);  /* default pointer              */
 #ifdef USE_ZSTD
     bool bin_proto = it->nbytes == len + 2;
-    /* zstd_maybe_decompress() may set resp->write_and_free            */
-    ssize_t ds = zstd_maybe_decompress(it, resp);
+    /* mcz_maybe_decompress() may set resp->write_and_free            */
+    ssize_t ds = mcz_maybe_decompress(it, resp);
     if (ds > 0) {                        /* success: use plain data  */
         ptr = resp->write_and_free;
         sz  = bin_proto? (size_t)ds - 2/*Do not send last \r\n*/: (size_t)ds;
@@ -1464,7 +1484,7 @@ static void reset_cmd_handler(conn *c) {
 }
 
 #ifdef USE_ZSTD
-static inline bool is_zstd_not_supported_cmd(conn *c) {
+static inline bool is_mcz_not_supported_cmd(conn *c) {
 
 #ifdef PROXY
     if (c->protocol == proxy_prot){
@@ -1484,7 +1504,7 @@ static inline bool is_zstd_not_supported_cmd(conn *c) {
 
 static inline bool maybe_apply_compression(conn *c){
     item *it = c->item;
-    return !is_zstd_not_supported_cmd(c) && (it->it_flags & ITEM_CHUNKED) == 0;
+    return !is_mcz_not_supported_cmd(c) && (it->it_flags & ITEM_CHUNKED) == 0;
 }
 #endif // USE_ZSTD
 
@@ -1515,12 +1535,12 @@ static void complete_nread(conn *c) {
     uint16_t did = 0;                           /* dictionary id          */
 
     /* Try to compress -------------------------------------------------- */
-    ssize_t clen = zstd_maybe_compress(ITEM_data(oit), oit->nbytes,
+    ssize_t clen = mcz_maybe_compress(ITEM_data(oit), oit->nbytes,
                                        &cbuf, &did);
 
     if (clen > 0) {             /* Success → store compressed copy */
         /* 0. Add to dictinary training set (if necessary) */
-        zstd_sample(ITEM_data(oit), oit->nbytes);
+        mcz_sample(ITEM_data(oit), oit->nbytes);
         /* 1. Allocate a new, smaller item in the correct slab class    */
         item *nit = do_item_alloc(ITEM_key(oit), oit->nkey,
                                   c->req_client_flags, oit->exptime, (int)clen);
@@ -5298,7 +5318,7 @@ int main (int argc, char **argv) {
             break;
 #ifdef USE_ZSTD
        case 'z' :
-            if (parse_zstd_config(optarg) != 0) {
+            if (parse_mcz_config(optarg) != 0) {
                 fprintf(stderr, "failed to load zstd config file %s\n", optarg);
                 exit(EXIT_FAILURE);
             }
@@ -6090,12 +6110,12 @@ int main (int argc, char **argv) {
     }
 #endif
 #ifdef USE_ZSTD
-    extern zstd_ctx_t g_zstd;
-    if (zstd_cfg_init(&g_zstd.cfg) != 0) {
+    extern mcz_ctx_t g_mcz;
+    if (mcz_cfg_init(&g_mcz.cfg) != 0) {
         fprintf(stderr, "fatal: bad zstd configuration\n");
         exit(EXIT_FAILURE);
     }
-    zstd_init(&g_zstd.cfg);
+    mcz_init(&g_mcz.cfg);
 #endif
     if (settings.drop_privileges) {
         setup_privilege_violations_handler();

@@ -595,7 +595,7 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
                   MEMCACHED_COMMAND_GET(c->sfd, ITEM_key(it), it->nkey,
                                         it->nbytes, ITEM_get_cas(it));
 #ifdef USE_ZSTD
-                  int nbytes = ITEM_is_zstd(it)? zstd_orig_size(ITEM_data(it), it->nbytes):it->nbytes;
+                  int nbytes = ITEM_is_zstd(it)? mcz_orig_size(ITEM_data(it), it->nbytes):it->nbytes;
 #else
                   int nbytes = it->nbytes;
 #endif
@@ -1169,7 +1169,7 @@ static void process_mget_command(conn *c, token_t *tokens, const size_t ntokens)
     // enough.
     if (it) {
 #ifdef USE_ZSTD
-        int nbytes = ITEM_is_zstd(it)? zstd_orig_size(ITEM_data(it), it->nbytes):it->nbytes;
+        int nbytes = ITEM_is_zstd(it)? mcz_orig_size(ITEM_data(it), it->nbytes):it->nbytes;
 #else
         int nbytes = it->nbytes;
 #endif
