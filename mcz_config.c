@@ -1,4 +1,33 @@
-/*-------------------------------- mcz_config.c -------------------------*/
+/*
+ * Copyright (c) 2025 Vladimir Rodionov
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/*
+ * mcz_config.c
+ *
+ * Configuration parsing and runtime options for memcached-Zstd (MCZ).
+ *
+ * Responsibilities:
+ *   - Define configuration structures (compression level, dictionary paths, limits).
+ *   - Parse configuration files, environment variables, or command-line arguments.
+ *   - Provide getters for other modules (compression, dict, trainer).
+ *
+ * Design:
+ *   - Centralized configuration, immutable after initialization.
+ *   - Plain C structures, minimal dependencies.
+ *   - All symbols prefixed with `mcz_` for consistency.
+ */
 #include <ctype.h>
 #include <errno.h>
 #include <inttypes.h>
@@ -209,10 +238,7 @@ int parse_mcz_config(const char *path)
         } else if (strcasecmp(key, "mcz.min_savings") == 0) {
             double d; if (parse_frac(val, &d)) { fprintf(stderr, "%s:%d: bad min_savings '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             settings.mcz_min_savings = d;
-
-        } else if (strcasecmp(key, "mcz.dict_map") == 0) {
-            free(settings.mcz_dict_map); settings.mcz_dict_map = val && *val ? strdup(val) : NULL;
-
+            
             /* Training */
         } else if (strcasecmp(key, "mcz.enable_training") == 0) {
             bool b; if (parse_bool(val, &b)) { fprintf(stderr, "%s:%d: bad bool '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
@@ -233,8 +259,18 @@ int parse_mcz_config(const char *path)
         } else if (strcasecmp(key, "mcz.retrain_drop") == 0) {
             double d; if (parse_frac(val, &d)) { fprintf(stderr, "%s:%d: bad retrain_drop '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             settings.mcz_retrain_drop = d;
-
-            /* Retention */
+        } else if (strcasecmp(key, "mcz.gc_run_interval") == 0) {
+                int64_t s; if (parse_duration_sec(val, &s)) { fprintf(stderr, "%s:%d: bad gc_run_interval '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+                settings.mcz_gc_run_interval = s;
+            
+        } else if (strcasecmp(key, "mcz.gc_cool_period") == 0) {
+            int64_t s; if (parse_duration_sec(val, &s)) { fprintf(stderr, "%s:%d: bad gc_cool_period '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            settings.mcz_gc_cool_period = s;
+            
+        } else if (strcasecmp(key, "mcz.gc_quarantine_period") == 0) {
+               int64_t s; if (parse_duration_sec(val, &s)) { fprintf(stderr, "%s:%d: bad gc_quarantine_period '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+               settings.mcz_gc_quarantine_period = s;
+        /* Retention */
         } else if (strcasecmp(key, "mcz.dict_retain_hours") == 0) {
             char *end; long v = strtol(val, &end, 10);
             if (val == end || *end || v < 0 || v > 24*365) { fprintf(stderr, "%s:%d: bad dict_retain_hours '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }

@@ -1,3 +1,34 @@
+/*
+ * Copyright (c) 2025 Vladimir Rodionov
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/*
+ * mcz_compression.c
+ *
+ * Implementation of Zstd compression/decompression for MCZ.
+ *
+ * Key duties:
+ *   - Manage Zstd CCtx/DCtx instances and dictionary attachments.
+ *   - Provide fast-path compression and decompression entry points.
+ *   - Handle integration with dictionary router table and trainer thread.
+ *   - Maintain thread-local caches to reduce allocation churn.
+ *
+ * Notes:
+ *   - Hot-path code avoids locks; relies on atomics and TLS.
+ *   - Trainer thread may update global dictionary table asynchronously.
+ *   - Always validate dictionary IDs and namespaces before use.
+ */
 #include "mcz_compression.h"
 
 #include <pthread.h>
@@ -12,18 +43,15 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <limits.h>         /* PATH_MAX                   */
-/*  add these two lines  */
 #include <sys/types.h>
 #include <sys/stat.h>
-#include "memcached.h"  /* memcached.h                */
+#include "memcached.h"
 #include "mcz_incompressible.h"
-/* ---------- TLS cache per worker thread ----------------------------- */
-typedef struct {
-    ZSTD_CCtx *cctx;
-    ZSTD_DCtx *dctx;
-    void *scratch;
-    size_t cap;
-} tls_cache_t;
+#include "mcz_utils.h"
+#include "mcz_gc.h"
+#include "mcz_dict_pool.h"
+#include "mcz_eff_atomic.h"
+
 
 static __thread tls_cache_t tls; /* zero-initialised */
 
@@ -34,9 +62,12 @@ mcz_ctx_t g_mcz = { 0 };      /* zero-init by the loader */
 const mcz_ctx_t *mcz_ctx(void)      { return &g_mcz; }
 mcz_ctx_t       *mcz_ctx_mut(void)  { return &g_mcz; }
 
+static const mcz_table_t *mcz_current_table(void) {
+    const mcz_ctx_t *ctx = mcz_ctx();
+    return (const mcz_table_t*)atomic_load_explicit(&ctx->dict_table, memory_order_acquire);
+}
+
 /* ---------- helper macros ------------------------------------------- */
-#define CDICT(ctx) ((ZSTD_CDict*)atomic_load_explicit(&(ctx)->cdict, memory_order_acquire))
-#define DDICT(ctx) ((ZSTD_DDict*)atomic_load_explicit(&(ctx)->ddict, memory_order_acquire))
 
 #define KB(x)  ((size_t)(x) << 10)
 #define MB(x)  ((size_t)(x) << 20)
@@ -135,6 +166,32 @@ mcz_cfg_init(mcz_cfg_t *cfg)
     }
     cfg->enable_dict = settings.mcz_enable_dict;
     cfg->enable_comp = settings.mcz_enable_comp;
+    
+    /* Training */
+    cfg->enable_training = settings.mcz_enable_training;
+    cfg->retraining_interval_s = settings.mcz_retraining_interval_s;
+    cfg->min_training_size = settings.mcz_min_training_size;
+    cfg->ewma_alpha = settings.mcz_ewma_alpha;
+    cfg->retrain_drop = settings.mcz_retrain_drop;
+    
+    /* Garbage collection */
+    cfg->gc_run_interval = settings.mcz_gc_run_interval;
+    cfg->gc_cool_period = settings.mcz_gc_cool_period;
+    cfg->gc_quarantine_period = settings.mcz_gc_quarantine_period;
+
+    /* Retention */
+    cfg->dict_retain_hours = settings.mcz_dict_retain_hours;
+    cfg->dict_retain_max = settings.mcz_dict_retain_max;
+    
+    /* Sampling + Spool */
+    cfg->enable_sampling = settings.mcz_enable_sampling;
+    cfg->sample_p = settings.mcz_sample_p;
+    cfg->sample_window_sec= settings.mcz_sample_window_sec;
+    cfg->sample_roll_bytes = settings.mcz_sample_roll_bytes;
+    cfg->spool_dir = settings.mcz_spool_dir;
+    cfg->spool_max_bytes = settings.mcz_spool_max_bytes;
+    /* Not used */
+    cfg->compress_keys = settings.mcz_compress_keys;
 
     return 0;
 }
@@ -157,51 +214,6 @@ void mcz_get_stats(mcz_stats_t *out) {
     *out = mcz_stats;
 }
 
-/* ----------------------------------------------------------------------
- * log_rate_limited()
- *   Prints to stderr at most once every `interval_us` micro-seconds.
- *   Uses a static timestamp; thread-safe under POSIX (atomic exchange).
- * -------------------------------------------------------------------- */
-
-static uint64_t now_usec(void) /* monotonic wall-clock */
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    return (uint64_t) ts.tv_sec * 1000000ULL + (uint64_t) ts.tv_nsec / 1000ULL;
-}
-
-static void log_rate_limited(uint64_t interval_us, const char *fmt, ...) {
-
-    /* time of last log */
-    static _Atomic(uint64_t) last_ts = 0;
-
-    uint64_t now = now_usec();
-    uint64_t prev = atomic_load_explicit(&last_ts, memory_order_relaxed);
-
-    if (now - prev < interval_us)
-        return; /* still within quiet window */
-
-    /* attempt to claim the slot */
-    if (!atomic_compare_exchange_strong_explicit(&last_ts, &prev, now,
-            memory_order_acq_rel, memory_order_relaxed))
-        return; /* another thread logged */
-
-    /* we won the race → emit message */
-    va_list ap;
-    va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    va_end(ap);
-}
-
-static int str_to_u16(const char *s, uint16_t *out) {
-    char *end;
-    long v = strtol(s, &end, 10);
-    if (*end || v <= 0 || v > 0xFFFF)
-        return -EINVAL;
-    *out = (uint16_t) v;
-    return 0;
-}
-
 /* ---------------------------------------------------------------------
  * loadDictionary()
  *   If ctx->cfg.dict_path is non-NULL, reads the file, builds CDict/DDict,
@@ -216,98 +228,33 @@ static int mcz_load_dicts(void) {
     if (!ctx->cfg.enable_dict){
         return 1;
     }
-    DIR *d = opendir(ctx->cfg.dict_dir);
-    if (!d){
-        int e = errno;
-        if (settings.verbose > 1) {
-            fprintf(stderr, "[mcz_load_dicts] opendir(%s) failed: %s\n",
-                    ctx->cfg.dict_dir, strerror(e));
-        }
-        return -e;           /* or handle specifically */
+    char *err = NULL;
+    mcz_table_t *tab = mcz_scan_dict_dir(ctx->cfg.dict_dir, ctx->cfg.dict_retain_max,
+                                         ctx->cfg.gc_quarantine_period, &err);
+    if (err != NULL){
+        fprintf(stderr, "load dictionaries failed: %s\n", err ? err : "unknown error");
+        free(err);
+        return 1;
     }
-
-    struct dirent *de;
-    uint16_t id = 0;
-    char full[PATH_MAX] = { 0 };
-
-    while ((de = readdir(d))) {
-        if (de->d_type == DT_DIR)
-            continue;
-        if (str_to_u16(de->d_name, &id) == 0) {
-            snprintf(full, sizeof(full), "%s/%s", ctx->cfg.dict_dir,
-                    de->d_name);
-            break;
-        }
+    if (tab) {
+        atomic_store_explicit(&ctx->dict_table, (uintptr_t)tab, memory_order_release);
+    } else {
+        return 1;
     }
-    closedir(d);
-    if (!id)
-        return -ENOENT; /* none found */
-
-    /* read file */
-    FILE *f = fopen(full, "rb");
-    if (!f) {
-        if (settings.verbose > 1){
-            fprintf(stderr, "[mcz_load_dicts] fopen(%s) failed: %s\n",
-                    full, strerror(errno));
-        }
-        return -errno; /* I/O error */
-    }
-
-    fseek(f, 0, SEEK_END);
-    long file_size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (file_size <= 0) {
-        fclose(f);
-        return 1; /* zero-length file: ignore silently */
-    }
-
-    void *buf = malloc(file_size);
-    if (!buf) {
-        fclose(f);
-        fprintf(stderr, "[mcz_load_dicts] malloc failed\n");
-        return -ENOMEM;
-    }
-
-    size_t off = 0;
-    while (off < (size_t) file_size) {
-        size_t n = fread((char*) buf + off, 1, (size_t) file_size - off, f);
-        if (n == 0) { /* I/O error or EOF too early */
-            free(buf);
-            fclose(f);
-            free(buf);
-            if (settings.verbose > 1) {
-                fprintf(stderr, "[mcz_load_dicts] fread(%s) failed: %s\n",
-                        full, strerror(errno));
-            }
-            return -EIO;
-        }
-        off += n;
-    }
-    fclose(f);
-
-    ZSTD_CDict *cd = ZSTD_createCDict(buf, file_size, ctx->cfg.zstd_level ? ctx->cfg.zstd_level : 3);
-    ZSTD_DDict *dd = ZSTD_createDDict(buf, file_size);
-
-    if (!cd || !dd) {
-        free(buf);
-        if (cd)
-            ZSTD_freeCDict(cd);
-        if (dd)
-            ZSTD_freeDDict(dd);
-        free(buf);
-        if (settings.verbose > 1){
-            fprintf(stderr, "[mcz_load_dicts] contexts creation failed\n");
-        }
-        return -ENOMEM; /* alloc failed */
-    }
-    free(buf);
-
-    atomic_store_explicit(&ctx->cdict, (uintptr_t) cd, memory_order_release);
-    atomic_store_explicit(&ctx->ddict, (uintptr_t) dd, memory_order_release);
-    atomic_store_explicit(&ctx->cur_dict_id, id, memory_order_release);
-    /* load file exactly as before ... */
-    atomic_store(&ctx->dict_ready, true); /* disable training */
     return 0;
+}
+
+static inline bool is_training_active(void) {
+    const mcz_ctx_t *c = mcz_ctx();
+    /* any cheap acquire fence is fine; on x86 it's a compiler barrier */
+    /* Do we really need this? - this will trash performance*/
+    atomic_thread_fence(memory_order_acquire);
+    return c->train_active;
+}
+
+static inline void set_training_active(bool active){
+    mcz_ctx_t *ctx = mcz_ctx_mut();
+    atomic_store(&ctx->train_active, active);
 }
 
 static int mcz_save_dict(const void *dict, size_t dict_size,
@@ -390,9 +337,16 @@ static void* trainer_main(void *arg) {
     while (1) {
         usleep(100000); /* 100 ms */
         bool success = false;
+        // Check if we need to activate training
+        bool train_active = is_training_active();
+        if (!train_active){
+            set_training_active(mcz_eff_should_retrain((uint64_t) time(NULL)));
+            continue;
+        }
         if (atomic_load_explicit(&ctx->bytes_pending, memory_order_acquire)
                 < train_threshold)
             continue;
+ 
         /* Atomically take ownership of the whole list */
         sample_node_t *list = atomic_exchange_explicit(&ctx->samples_head,
         NULL, memory_order_acq_rel);
@@ -440,30 +394,8 @@ static void* trainer_main(void *arg) {
             ZSTD_DDict *nd = ZSTD_createDDict(dict, dict_sz);
 
             if (nc && nd) {
-
-                /* atomically swap in new dicts */
-                /* Note: we use acquire-release semantics to ensure that
-                 * the new CDict/DDict is visible to all threads after this point.
-                 * This code works only for one shot dictionary training, 0 -> 1
-                 * transition. If you want to support multiple training sessions,
-                 * we need different storage for trained dictionaries - map (id - CDict, id - DDict
-                 */
-                uintptr_t oldc = atomic_exchange_explicit(&ctx->cdict,
-                        (uintptr_t) nc, memory_order_acq_rel);
-                uintptr_t oldd = atomic_exchange_explicit(&ctx->ddict,
-                        (uintptr_t) nd, memory_order_acq_rel);
-                if (oldc)
-                    ZSTD_freeCDict((ZSTD_CDict*) oldc);
-                if (oldd)
-                    ZSTD_freeDDict((ZSTD_DDict*) oldd);
-                /* keep `dict` alive: owned by nc/nd */
-                /* SUCCESS → publish */
-                /* Increment global dictionary ID atomically                            */
-                uint16_t new_id = atomic_load_explicit(&ctx->cur_dict_id,
-                                                       memory_order_relaxed) + 1;
-                if (new_id == 0) new_id = 1;        /* wrap 0xFFFF → 1 */
-                atomic_store_explicit(&ctx->cur_dict_id, new_id, memory_order_release);
-                atomic_store_explicit(&ctx->dict_ready, true, memory_order_release);
+                uint16_t new_id = 0;
+                
                 if (settings.verbose > 1) {
                     log_rate_limited(1000000ULL, /* 1 s */
                                      "mcz-dict: new dict %u (%zu B) built from %zu samples\n",
@@ -507,6 +439,9 @@ static void* trainer_main(void *arg) {
         free(buff);
         free(sizes);
         if (success) {
+            // disable training and report eff
+            set_training_active(false);
+            mcz_eff_mark_retrained((uint64_t)time(NULL));
             break;
         } else {
             atomic_fetch_sub_explicit(&ctx->bytes_pending, total,
@@ -514,14 +449,6 @@ static void* trainer_main(void *arg) {
         }
     }
     return NULL; /* never reached */
-}
-
-static inline bool dict_is_ready(void) {
-    const mcz_ctx_t *c = mcz_ctx();
-    /* any cheap acquire fence is fine; on x86 it's a compiler barrier */
-    /* Do we really need this? - this will trash performance*/
-    atomic_thread_fence(memory_order_acquire);
-    return c->dict_ready;
 }
 
 /* ---------- public init / destroy ----------------------------------- */
@@ -542,10 +469,6 @@ int mcz_init(mcz_cfg_t *cfg) {
     /* 2. atomic pointers / counters */
     atomic_init(&ctx->samples_head, NULL); /* empty list            */
     atomic_init(&ctx->bytes_pending, 0);
-    atomic_init(&ctx->cdict, (uintptr_t) NULL);
-    atomic_init(&ctx->ddict, (uintptr_t) NULL);
-    atomic_init(&ctx->dict_ready, false);
-    atomic_init(&ctx->cur_dict_id, 0); /* 0 = no dict, 1 = active */
     ctx->trainer_tid = (pthread_t ) { 0 }; /* will be set by trainer thread */
 
     /* try external dictionary first */
@@ -558,6 +481,19 @@ int mcz_init(mcz_cfg_t *cfg) {
     if (!cfg->enable_dict) {
         return 0;
     }
+    mcz_train_cfg_t ecfg = {
+        .enable_training = true,
+        .retraining_interval_s = ctx->cfg.retraining_interval_s,
+        .min_training_size = ctx->cfg.min_training_size,
+        .ewma_alpha = ctx->cfg.ewma_alpha,
+        .retrain_drop = ctx->cfg.retrain_drop
+    };
+
+    mcz_eff_configure(&ecfg);                 /* single-threaded init */
+    mcz_eff_init((uint64_t)time(NULL));
+    
+    /* ---------------- init retired dictionaries pool ----------------------*/
+    mcz_dict_pool_init();
     /* ---------------- spawn background trainer --------------------------- */
 
     pthread_attr_t attr;
@@ -569,6 +505,12 @@ int mcz_init(mcz_cfg_t *cfg) {
         log_rate_limited(1000000ULL,
                          "mcz-dict: trainer thread started (max_dict=%zu B)\n", ctx->cfg.dict_size);
     }
+    /* ---------------- spawn background garbage collector --------------------------- */
+    mcz_gc_start(ctx);
+    if (settings.verbose > 1) {
+        log_rate_limited(0ULL,
+                         "mcz-dict: GC thread started (gc_run_interval=%zu sec)\n", ctx->cfg.gc_run_interval);
+    }
     return 0;
 }
 
@@ -576,17 +518,9 @@ void mcz_destroy(void) {
     mcz_ctx_t *ctx = mcz_ctx_mut();
 
     /* note: trainer thread is detached and loops forever; in production
-     you may add a stop flag + join, or just let process exit */
-    ZSTD_CDict *cd = CDICT(ctx);
-    ZSTD_DDict *dd = DDICT(ctx);
-    if (cd)
-        ZSTD_freeCDict(cd);
-    if (dd)
-        ZSTD_freeDDict(dd);
+     we may add a stop flag + join, or just let process exit */
 
-    free(ctx);
-
-    /* free thread-local caches for the calling thread */
+    /* free thread-local caches for the calling thread . TODO: other threads?*/
     if (tls.scratch) {
         free(tls.scratch);
         tls.scratch = NULL;
@@ -600,6 +534,11 @@ void mcz_destroy(void) {
         ZSTD_freeDCtx(tls.dctx);
         tls.dctx = NULL;
     }
+    mcz_dict_pool_shutdown();
+    mcz_gc_stop(ctx);
+    
+    free(ctx);
+
 }
 
 void mcz_sample(const void *src, size_t len) {
@@ -607,7 +546,7 @@ void mcz_sample(const void *src, size_t len) {
     /* skip very large and very small items */
     if (len >ctx->cfg.max_comp_size || len < ctx->cfg.min_comp_size)
         return;
-    if (dict_is_ready()) /* skip if dictionary is ready */
+    if (!is_training_active()) /* skip if training is not active */
         return;
     if (is_likely_incompressible((const uint8_t *) src, len)){
         return;
@@ -659,17 +598,22 @@ get_ddict_by_id(uint16_t id)
 /* For now we support only one live dictionary (id==1). When you implement
  * rotation, change this helper to do a table lookup or array index.          */
 {
-    mcz_ctx_t *ctx = mcz_ctx_mut();
-    return (id == 1) ? DDICT(ctx) : NULL;
+    const mcz_table_t *table = mcz_current_table();
+    if(!table) return NULL;
+    const mcz_dict_meta_t *meta = mcz_lookup_by_id(table, id);
+    if(!meta) return NULL;
+    return meta->ddict;
 }
 
-static inline const ZSTD_CDict*
-get_cdict_by_id(uint16_t id) {
-    mcz_ctx_t *ctx = mcz_ctx_mut();
-    /* For now we support only one live dictionary (id==1). When you implement
-     * rotation, change this helper to do a table lookup or array index.          */
-    return (id == 1) ? CDICT(ctx) : NULL;
+
+static inline const mcz_dict_meta_t *
+get_meta_by_key(const char *key, size_t klen) {
+    const mcz_table_t *table = mcz_current_table();
+    if(!table) return NULL;
+    const mcz_dict_meta_t *meta = mcz_pick_dict(table, key, klen);
+    return meta;
 }
+
 ssize_t inline mcz_orig_size(const void *src, size_t comp_size){
     /* TODO if size in available ?*/
     return ZSTD_getFrameContentSize(src, comp_size);
@@ -682,7 +626,7 @@ static inline unsigned long long cur_tid(void) {
  *  • On success: returns compressed size (≥0) and sets *dict_id_out.
  *  • On error  : returns negative errno / ZSTD error; *dict_id_out == 0.
  * ----------------------------------------------------------------*/
-ssize_t mcz_maybe_compress(const void *src, size_t src_sz,
+ssize_t mcz_maybe_compress(const void *src, size_t src_sz, const void *key, size_t key_sz,
                     void **dst, uint16_t *dict_id_out)
 {
     mcz_ctx_t *ctx = mcz_ctx_mut();          /* global-static instance */
@@ -698,10 +642,10 @@ ssize_t mcz_maybe_compress(const void *src, size_t src_sz,
         return 0;                              /* bypass */
 
     /* 1.  choose dictionary -------------------------------------- */
-    uint16_t did = atomic_load_explicit(&ctx->cur_dict_id,
-                                        memory_order_acquire);
-    const ZSTD_CDict *cd = did ? get_cdict_by_id(did) : NULL;
-
+    const mcz_dict_meta_t *meta = get_meta_by_key(key, key_sz);
+    const ZSTD_CDict *cd = meta? meta->cdict: NULL;
+    uint16_t did = meta? meta->id:0;
+    
     /* 2.  prepare TLS scratch ------------------------------------ */
     size_t bound = ZSTD_compressBound(src_sz);
     tls_ensure(bound);                         /* ensure scratch ≥ bound */
@@ -715,13 +659,15 @@ ssize_t mcz_maybe_compress(const void *src, size_t src_sz,
                                    src, src_sz, ctx->cfg.zstd_level);
     if (ZSTD_isError(csz))
         return -(ssize_t)ZSTD_getErrorCode(csz);
-    /* 4.  ratio check – skip if no benefit ----------------------- */
+    /* 4. report 'eff' statistics */
+    mcz_eff_on_observation(src_sz, csz);
+    /* 5.  ratio check – skip if no benefit ----------------------- */
     if (csz >= src_sz)
         return 0;
 
-    /* 5.  success ------------------------------------------------ */
+    /* 6.  success ------------------------------------------------ */
     *dst         = dst_buf;          /* valid until same thread calls tls_ensure() again */
-    *dict_id_out = cd ? did : 0;     /* 0 = no dictionary             */
+    *dict_id_out = did;              /* 0 = no dictionary             */
     return (ssize_t)csz;
 }
 
@@ -781,6 +727,7 @@ ssize_t mcz_maybe_decompress(const item *it, mc_resp    *resp) {
      const ZSTD_DDict *dd = get_ddict_by_id(did);
     if (!dd && did > 0){
         fprintf(stderr, "[mcz] decompress: unknown dict id %u\n", did);
+        //TODO: item must be deleted upstream
         return -EINVAL;                  /* unknown dict id */
     }
 
@@ -817,4 +764,87 @@ ssize_t mcz_maybe_decompress(const item *it, mc_resp    *resp) {
      /* 5. Hand buffer to network layer ---------------------------- */
      resp->write_and_free = dst;
      return dec;                          /* decompressed bytes */
+}
+
+
+/* ---- Publish / current (copy-on-write) ---- */
+
+static void mcz_publish_table(mcz_table_t *tab) {
+    mcz_ctx_t *ctx = mcz_ctx_mut();
+    
+    /* bump generation from current */
+    mcz_table_t *old = (mcz_table_t*)atomic_load_explicit(&ctx->dict_table, memory_order_acquire);
+    tab->gen = old ? (old->gen + 1) : 1;
+    atomic_store_explicit(&ctx->dict_table, (uintptr_t)tab, memory_order_release);
+    /* enqueue retired table to GC*/
+    if (old) mcz_gc_enqueue_retired(ctx, old);
+}
+
+/* ---- Coordinated reload (no pause-the-world) ---- */
+int mcz_reload_dictionaries(void)
+{
+    mcz_ctx_t *ctx = mcz_ctx_mut();
+    const char *dir = ctx->cfg.dict_dir;
+    char *err = NULL;
+    mcz_table_t *newtab = mcz_scan_dict_dir(dir, ctx->cfg.dict_retain_max,
+                                         ctx->cfg.gc_quarantine_period, &err);
+    if (err != NULL){
+        fprintf(stderr, "reload dictionaries failed: %s\n", err ? err : "unknown error");
+        free(err);
+        return -ENOENT;
+    }
+    mcz_publish_table(newtab);
+    /* Threads will see new gen; their next call to mcz_tls_maybe_reset() clears TLS slots */
+    return 0;
+}
+
+
+static int mcz_add_dictionary(const mcz_dict_meta_t *new_meta_in,
+                       const ZSTD_CDict *cdict,
+                       const ZSTD_DDict *ddict,
+                       char **err_out)
+{
+    if ( !new_meta_in || !cdict || !ddict) { set_err(err_out, "mcz_add_dictionary: %s","bad args"); return -EINVAL; }
+    size_t max_per_ns = mcz_ctx()->cfg.dict_retain_max;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        const mcz_table_t *cur = mcz_current_table();
+        mcz_table_t *next = table_clone_plus(cur, new_meta_in, cdict, ddict, max_per_ns, err_out);
+        if (!next) { set_err(err_out, "mcz_add_dictionary: %s","bad args"); return -ENOMEM;}
+
+        /* Optional strict “build-from-latest” check */
+        const mcz_table_t *cur2 = mcz_current_table();
+        if (cur2 != cur) {
+            /* clean next and retry */
+            if (next->spaces) {
+                for (size_t i = 0; i < next->nspaces; ++i) {
+                    if (next->spaces[i]) {
+                        free(next->spaces[i]->dicts);
+                        free(next->spaces[i]->prefix);
+                        free(next->spaces[i]);
+                    }
+                }
+                free(next->spaces);
+            }
+            if (next->metas) {
+                for (size_t i = 0; i < next->nmeta; ++i) {
+                    free(next->metas[i].dict_path);
+                    free(next->metas[i].mf_path);
+                    if (next->metas[i].prefixes) {
+                        for (size_t j = 0; j < next->metas[i].nprefixes; ++j) free(next->metas[i].prefixes[j]);
+                        free(next->metas[i].prefixes);
+                    }
+                    free(next->metas[i].signature);
+                }
+                free(next->metas);
+            }
+            free(next);
+            continue;
+        }
+
+        mcz_publish_table(next);
+        return 0;
+    }
+
+    set_err(err_out, "mcz_add_dictionary: %s", "concurrent updates: retries exhausted");
+    return -EAGAIN;
 }

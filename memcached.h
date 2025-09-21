@@ -590,7 +590,6 @@ struct settings {
     size_t   mcz_min_size;              // compress if >=
     size_t   mcz_max_size;              // compress if <=
     double   mcz_min_savings;           // 0..1 (skip if below)
-    char    *mcz_dict_map;              // path (prefix->dict map)
     bool     mcz_compress_keys;         // compress key (false, not implemented yet)
 
     // Training
@@ -599,7 +598,10 @@ struct settings {
     size_t   mcz_min_training_size;     // bytes of eligible data since last train
     double   mcz_ewma_alpha;            // 0..1
     double   mcz_retrain_drop;          // 0..1
-
+    // GC
+    int32_t      mcz_gc_run_interval;
+    int32_t      mcz_gc_cool_period;
+    int32_t      mcz_gc_quarantine_period;
     // Retention
     int      mcz_dict_retain_hours;     // keep dicts <= N hours
     int      mcz_dict_retain_max;       // cap count of resident old dicts

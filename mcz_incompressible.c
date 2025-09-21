@@ -1,3 +1,33 @@
+/*
+ * Copyright (c) 2025 Vladimir Rodionov
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/*
+ * mcz_incompressible.c
+ *
+ * Fast detection of incompressible payloads in memcached-Zstd (MCZ).
+ *
+ * Responsibilities:
+ *   - Maintain heuristics for early rejection of incompressible data.
+ *   - Provide APIs to check whether a sample should be skipped.
+ *   - Keep simple statistics to refine heuristics (optional).
+ *
+ * Design:
+ *   - Header-only declarations; lightweight hot-path functions.
+ *   - Integrated with compression pipeline before dictionary/level selection.
+ *   - All functions prefixed with `mcz_` for clarity.
+ */
 #include "mcz_incompressible.h"
 #include <zstd.h>
 

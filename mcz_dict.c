@@ -1,0 +1,989 @@
+/*
+ * Copyright (c) 2025 Vladimir Rodionov
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/*
+ * mcz_dict.c
+ *
+ * Dictionary metadata and routing table subsystem.
+ *
+ * Responsibilities:
+ *   - Define metadata for individual dictionaries (mcz_dict_meta_t).
+ *   - Organize dictionaries into namespaces (mcz_ns_entry_t).
+ *   - Maintain the global router table (mcz_table_t):
+ *       • Lookup by namespace prefix.
+ *       • O(1) lookup by ID via by_id[] array.
+ *       • Sorted newest-first within each namespace.
+ *   - Provide APIs for:
+ *       • Parsing/writing manifest files.
+ *       • Loading/saving dictionaries to the filesystem.
+ *       • Publishing new tables atomically via copy-on-write.
+ *
+ * Design:
+ *   - Copy-on-write: new table built from old + new dict, then atomically
+ *     published.
+ *   - Old tables retired to GC for safe reclamation.
+ *   - Default namespace is "global" if none provided.
+ *
+ * Naming convention:
+ *   - All functions/types prefixed with `mcz_dict_*` belong to this subsystem.
+ */
+//* ---- macOS-friendly feature macros (must come before any system headers) ---- */
+#if defined(__APPLE__)
+  /* Expose Darwin extensions like sys_signame/NSIG/timegm */
+  #ifndef _DARWIN_C_SOURCE
+  #define _DARWIN_C_SOURCE 1
+  #endif
+  /* If strict POSIX was previously forced by another header, undo it here. */
+  #undef _XOPEN_SOURCE
+  /* Keeping _POSIX_C_SOURCE is fine as long as _DARWIN_C_SOURCE is also set. */
+#endif
+
+/* Keep POSIX 2008 features too (getline, etc.). Safe alongside _DARWIN_C_SOURCE. */
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+/* --------------------------------------------------------------------------- */
+#include <strings.h>     /* strcasecmp on BSD/macOS */
+#include <sys/signal.h>  /* defines NSIG/sys_signame on macOS */
+#include <signal.h>
+#include <time.h>
+
+#include <ctype.h>
+#include <dirent.h>
+#include <errno.h>
+#include <inttypes.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
+#include <fcntl.h>
+#include <limits.h>
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <unistd.h>
+
+#include "mcz_dict.h"
+#include "mcz_utils.h"
+#include "mcz_dict_pool.h"
+#include "memcached.h"   /* for settings, mc logging if you have it */
+
+
+/* ----- manifest parsing ----- */
+static int parse_manifest_file(const char *mf_path, const char *dir, mcz_dict_meta_t *m){
+    memset(m, 0, sizeof(*m));
+    FILE *fp = fopen(mf_path, "r");
+    if (!fp) return -errno;
+    m->mf_path = xstrdup(mf_path);
+
+    char *line=NULL; size_t cap=0; int rc=0;
+    while (getline(&line, &cap, fp) != -1) {
+        trim(line);
+        if (!*line || *line=='#') continue;
+        char *eq = strchr(line,'=');
+        if (!eq) continue;
+        *eq = '\0';
+        char *key = line, *val = eq+1;
+        trim(key); trim(val);
+
+        if (!strcasecmp(key,"id")) {
+            long v = strtol(val, NULL, 10);
+            if (v<=0 || v>65535) { rc = -EINVAL; break; }
+            m->id = (uint16_t)v;
+
+        } else if (!strcasecmp(key,"dict_file")) {
+            char buf[PATH_MAX];
+            if (val[0] == '/') m->dict_path = xstrdup(val);
+            else { if (join_path(buf,sizeof(buf),dir,val)) { rc=-ENAMETOOLONG; break; } m->dict_path = xstrdup(buf); }
+
+        } else if (!strcasecmp(key,"namespaces")) {
+            char *tmp = xstrdup(val);
+            if (!tmp) { rc = -ENOMEM; break; }
+            rc = split_prefixes(tmp, &m->prefixes, &m->nprefixes);
+            free(tmp);
+            if (rc) break;
+
+        } else if (!strcasecmp(key,"created")) {
+            time_t t; if (parse_rfc3339_utc(val, &t)) { rc = -EINVAL; break; }
+            m->created = t;
+
+        } else if (!strcasecmp(key,"level")) {
+            m->level = (int)strtol(val,NULL,10);
+
+        } else if (!strcasecmp(key,"signature")) {
+            m->signature = xstrdup(val);
+        } else if (!strcasecmp(key,"retired")) {
+            if (*val == '\0') { m->retired = 0; }
+            else {
+                time_t t;
+                if (parse_rfc3339_utc(val, &t)) { rc = -EINVAL; break; }
+                m->retired = t;
+            }
+        }
+    }
+    free(line);
+    fclose(fp);
+    if (rc) return rc;
+
+    /* Derive id from filename if missing */
+    if (m->id == 0) {
+        const char *base = strrchr(mf_path,'/'); base = base? base+1 : mf_path;
+        char *dot = strrchr(base,'.');
+        size_t len = dot ? (size_t)(dot - base) : strlen(base);
+        char tmp[32]; if (len >= sizeof(tmp)) return -EINVAL;
+        memcpy(tmp, base, len); tmp[len] = '\0';
+        long v = strtol(tmp, NULL, 10);
+        if (v<=0 || v>65535) return -EINVAL;
+        m->id = (uint16_t)v;
+    }
+
+    /* Default dict_path if missing */
+    if (!m->dict_path) {
+        char buf[PATH_MAX]; char file[32];
+        snprintf(file,sizeof(file),"%" PRIu16 ".dict", m->id);
+        if (join_path(buf,sizeof(buf),dir,file)) return -ENAMETOOLONG;
+        m->dict_path = xstrdup(buf);
+    }
+
+    /* Default namespace if missing */
+    if (!m->prefixes || m->nprefixes==0) {
+        m->prefixes = calloc(1,sizeof(char*));
+        if (!m->prefixes) return -ENOMEM;
+        m->prefixes[0] = xstrdup("global");
+        m->nprefixes = 1;
+    }
+
+    return 0;
+}
+
+/* Load .dict into memory and create shared CDict/DDict */
+static int load_zstd_dict(const char *path, int level, const ZSTD_CDict **outC, const ZSTD_DDict **outD, size_t *sz_out){
+    int rc = 0; *outC=NULL; *outD=NULL; if (sz_out) *sz_out=0;
+    FILE *fp = fopen(path,"rb"); if (!fp) return -errno;
+    if (fseek(fp,0,SEEK_END)!=0){ rc=-errno; goto out; }
+    long n = ftell(fp); if (n<=0){ rc=-EINVAL; goto out; }
+    rewind(fp);
+    void *buf = malloc((size_t)n);
+    if (!buf){ rc=-ENOMEM; goto out; }
+    if (fread(buf,1,(size_t)n,fp) != (size_t)n){ free(buf); rc=-EIO; goto out; }
+
+    const ZSTD_CDict *cd = ZSTD_createCDict(buf,(size_t)n, level > 0 ? level : 3);
+    const ZSTD_DDict *dd = ZSTD_createDDict(buf,(size_t)n);
+    /* dict buffer can be freed after CDict/DDict creation */
+    free(buf);
+    if (!cd || !dd) { if (cd) ZSTD_freeCDict((ZSTD_CDict*)cd); if (dd) ZSTD_freeDDict((ZSTD_DDict*)dd); rc = -EINVAL; goto out; }
+
+    *outC = cd; *outD = dd; if (sz_out) *sz_out = (size_t)n;
+out:
+    fclose(fp);
+    return rc;
+}
+
+/* Phase-1 signature checker stub */
+static bool verify_manifest_signature(const mcz_dict_meta_t *m){
+    (void)m;
+    /* TODO: implement (e.g., SHA256 of dict + fields). For now, accept. */
+    return true;
+}
+
+/* Free one dict meta */
+static void free_dict_meta(mcz_dict_meta_t *m){
+    if (!m) return;
+    if (m->cdict) ZSTD_freeCDict((ZSTD_CDict*)m->cdict);
+    if (m->ddict) ZSTD_freeDDict((ZSTD_DDict*)m->ddict);
+    free(m->dict_path); free(m->mf_path); free(m->signature);
+    if (m->prefixes){ for (size_t i=0;i<m->nprefixes;i++) free(m->prefixes[i]); free(m->prefixes); }
+    memset(m,0,sizeof(*m));
+}
+
+
+
+/* ---- helpers ---- */
+
+static mcz_ns_entry_t *find_or_add_space(mcz_ns_entry_t ***spaces, size_t *nspaces, size_t *cspaces, const char *pref) {
+    for (size_t i=0;i<*nspaces;i++) {
+        if (strcmp((*spaces)[i]->prefix, pref) == 0) return (*spaces)[i];
+    }
+    if (*nspaces == *cspaces) {
+        size_t nc = *cspaces ? (*cspaces * 2) : 8;
+        void *tmp = realloc(*spaces, nc * sizeof(**spaces));
+        if (!tmp) return NULL;
+        *spaces = tmp; *cspaces = nc;
+    }
+    mcz_ns_entry_t *s = (mcz_ns_entry_t*)calloc(1, sizeof(*s));
+    if (!s) return NULL;
+    s->prefix = strdup(pref);
+    (*spaces)[(*nspaces)++] = s;
+    return s;
+}
+
+static int cmp_meta_created_desc(const void *a, const void *b) {
+    const mcz_dict_meta_t *A = *(mcz_dict_meta_t * const*)a;
+    const mcz_dict_meta_t *B = *(mcz_dict_meta_t * const*)b;
+    if (A->created == B->created) return (int)B->id - (int)A->id; /* newer id first on tie */
+    return (A->created < B->created) ? 1 : -1; /* newest first */
+}
+
+/* -------------------------
+ * Part 1: write <dir>/<id>.dict
+ * ------------------------- */
+static int mcz_save_dict_file(const char *dir,
+                       uint16_t id,
+                       const void *dict_data, size_t dict_size,
+                       char **out_abs_path,   /* optional: strdup of absolute dict path */
+                       size_t *out_dict_size, /* optional: echo of dict_size */
+                       char **err_out)
+{
+    if (!dir || !*dir || !dict_data || dict_size == 0 || id == 0) {
+        set_err(err_out, "mcz_save_dict_file: invalid arguments");
+        return -EINVAL;
+    }
+
+    /* Build target absolute path: <dir>/<id>.dict */
+    char file_dict[32];
+    snprintf(file_dict, sizeof(file_dict), "%" PRIu16 ".dict", id);
+
+    char dict_path[PATH_MAX];
+    if (join_path(dict_path, sizeof(dict_path), dir, file_dict) != 0) {
+        set_err(err_out, "mcz_save_dict_file: dict path too long");
+        return -ENAMETOOLONG;
+    }
+
+    /* Write atomically */
+    int rc = atomic_write_file(dir, dict_path, dict_data, dict_size, 0644, err_out);
+    if (rc != 0) {
+        if (!*err_out) set_err(err_out, "mcz_save_dict_file: atomic_write_file failed");
+        return rc;
+    }
+
+    if (out_abs_path) {
+        *out_abs_path = strdup(dict_path);
+        if (!*out_abs_path) {
+            set_err(err_out, "mcz_save_dict_file: OOM duplicating dict path");
+            return -ENOMEM;
+        }
+    }
+    if (out_dict_size) *out_dict_size = dict_size;
+
+    return 0;
+}
+
+/* -------------------------
+ * Part 2: write <dir>/<id>.mf
+ *   - prefixes may be NULL/0 => "global"
+ *   - signature optional (may be NULL/empty)
+ *   - created: pass 0 to use current time
+ * ------------------------- */
+
+
+/* Build "a, b, c" or "global" if none. Caller must free(). */
+static char *build_ns_line(const char * const *prefixes, size_t nprefixes) {
+    if (!prefixes || nprefixes == 0) return strdup("global");
+    size_t total = 1;
+    for (size_t i = 0; i < nprefixes; ++i) total += strlen(prefixes[i]) + 2;
+    char *s = (char*)malloc(total);
+    if (!s) return NULL;
+    s[0] = '\0';
+    for (size_t i = 0; i < nprefixes; ++i) {
+        if (i) strcat(s, ", ");
+        strcat(s, prefixes[i]);
+    }
+    return s;
+}
+
+static int render_manifest_text(uint16_t id,
+                                const char *dict_basename,
+                                const char *ns_line,
+                                time_t created,
+                                int level,
+                                const char *signature,
+                                time_t retired,              /* NEW */
+                                char **out_text,
+                                char **err_out)
+{
+    char created_rfc3339[32]; format_rfc3339_utc(created ? created : time(NULL), created_rfc3339);
+    char retired_rfc3339[32] = {0};
+    const char *retired_kv = "";
+    if (retired > 0) {
+        format_rfc3339_utc(retired, retired_rfc3339);
+        retired_kv = "retired = ";
+    }
+
+    const char *sig = (signature && *signature) ? signature : NULL;
+
+    size_t cap = 320 + strlen(dict_basename) + strlen(ns_line)
+                 + (sig ? strlen(sig) : 0) + (retired > 0 ? strlen(retired_rfc3339) : 0);
+    char *buf = (char*)malloc(cap);
+    if (!buf) { set_err(err_out, "manifest: OOM render"); return -ENOMEM; }
+
+    int n = snprintf(buf, cap,
+        "# MCZ dictionary manifest\n"
+        "id = %" PRIu16 "\n"
+        "dict_file = %s\n"
+        "namespaces = %s\n"
+        "created = %s\n"
+        "level = %d\n"
+        "%s%s%s"       /* signature line */
+        "%s%s%s",      /* retired line */
+        id, dict_basename, ns_line, created_rfc3339, level,
+        sig ? "signature = " : "", sig ? sig : "", sig ? "\n" : "",
+        (retired > 0 ? retired_kv : ""),
+        (retired > 0 ? retired_rfc3339 : ""),
+        (retired > 0 ? "\n" : ""));
+    if (n < 0 || (size_t)n >= cap) { free(buf); set_err(err_out, "manifest: snprintf overflow"); return -EOVERFLOW; }
+
+    *out_text = buf;
+    return 0;
+}
+/* Derive "<dir>/<id>.mf" given dir+id. */
+static int make_mf_path_from_dir_id(const char *dir, uint16_t id, char *out, size_t outlen, char **err_out){
+    char file_mf[32];
+    snprintf(file_mf, sizeof(file_mf), "%" PRIu16 ".mf", id);
+    if (join_path(out, outlen, dir, file_mf) != 0) {
+        set_err(err_out, "manifest: path too long");
+        return -ENAMETOOLONG;
+    }
+    return 0;
+}
+
+/* Derive "<...>.mf" from "<...>.dict" absolute path. */
+static int make_mf_path_from_dict_path(const char *dict_path, char *out, size_t outlen, char **err_out){
+    if (!dict_path || !*dict_path) { set_err(err_out, "manifest: empty dict_path"); return -EINVAL; }
+    const char *ext = strrchr(dict_path, '.');
+    if (!ext || strcmp(ext, ".dict") != 0) {
+        set_err(err_out, "manifest: dict_path must end with .dict");
+        return -EINVAL;
+    }
+    size_t len = (size_t)(ext - dict_path);
+    if (len + 3 >= outlen) { set_err(err_out, "manifest: path too long"); return -ENAMETOOLONG; }
+    memcpy(out, dict_path, len);
+    strcpy(out + len, ".mf");
+    return 0;
+}
+
+/* Extract basename from absolute dict path. */
+static const char *basename_from_path(const char *path){
+    const char *slash = path ? strrchr(path, '/') : NULL;
+    return slash ? slash + 1 : path;
+}
+
+/* Save <dir>/<id>.mf using provided attributes. */
+static int mcz_save_manifest_file(const char *dir,
+                           uint16_t id,
+                           const char * const *prefixes, size_t nprefixes,
+                           int level,
+                           const char *signature,
+                           time_t created,
+                           time_t retired,
+                           char **out_abs_path,
+                           char **err_out)
+{
+    if (!dir || !*dir || id == 0) { set_err(err_out, "manifest: invalid args"); return -EINVAL; }
+
+    /* ns line */
+    char *ns_line = build_ns_line(prefixes, nprefixes);
+    if (!ns_line) { set_err(err_out, "manifest: OOM namespaces"); return -ENOMEM; }
+
+    /* dict basename is "<id>.dict" */
+    char dict_file[32];
+    snprintf(dict_file, sizeof(dict_file), "%" PRIu16 ".dict", id);
+
+    /* render text */
+    char *mf_text = NULL;
+    int rc = render_manifest_text(id, dict_file, ns_line, created, level, signature, retired, &mf_text, err_out);
+    if (rc) { free(ns_line); return rc; }
+
+    /* path */
+    char mf_path[PATH_MAX];
+    rc = make_mf_path_from_dir_id(dir, id, mf_path, sizeof(mf_path), err_out);
+    if (rc) { free(ns_line); free(mf_text); return rc; }
+
+    /* atomic write */
+    rc = atomic_write_text(dir, mf_path, mf_text, err_out);
+    if (rc) { free(ns_line); free(mf_text); return rc; }
+
+    if (out_abs_path) {
+        *out_abs_path = strdup(mf_path);
+        if (!*out_abs_path) { set_err(err_out, "manifest: OOM strdup path"); free(ns_line); free(mf_text); return -ENOMEM; }
+    }
+
+    free(ns_line);
+    free(mf_text);
+    return 0;
+}
+
+/* Rewrite manifest next to an existing <...>.dict from meta. */
+static int mcz_rewrite_manifest(const mcz_dict_meta_t *meta, char **err_out)
+{
+    if (!meta || !meta->dict_path || meta->id == 0) {
+        set_err(err_out, "manifest: invalid meta");
+        return -EINVAL;
+    }
+
+    /* ns line from meta */
+    char *ns_line = build_ns_line((const char* const*)meta->prefixes, meta->nprefixes);
+    if (!ns_line) { set_err(err_out, "manifest: OOM namespaces"); return -ENOMEM; }
+
+    /* dict basename */
+    const char *dict_base = basename_from_path(meta->dict_path);
+
+    /* render text */
+    char *mf_text = NULL;
+    int rc = render_manifest_text(meta->id, dict_base, ns_line,
+                                  meta->created ? meta->created : time(NULL),
+                                  meta->level, meta->signature, meta->retired, &mf_text, err_out);
+    if (rc) { free(ns_line); return rc; }
+
+    /* derive manifest path from dict_path */
+    char mf_path[PATH_MAX];
+    rc = make_mf_path_from_dict_path(meta->dict_path, mf_path, sizeof(mf_path), err_out);
+    if (rc) { free(ns_line); free(mf_text); return rc; }
+
+    /* compute dir for atomic_write_text */
+    char *dirdup = strdup(meta->dict_path);
+    if (!dirdup) { free(ns_line); free(mf_text); set_err(err_out, "manifest: OOM path dup"); return -ENOMEM; }
+    char *slash = strrchr(dirdup, '/');
+    if (slash) *slash = '\0'; else strcpy(dirdup, ".");
+
+    rc = atomic_write_text(dirdup, mf_path, mf_text, err_out);
+
+    free(dirdup);
+    free(ns_line);
+    free(mf_text);
+    return rc;
+}
+
+static int assign_ids_from_fs(mcz_dict_meta_t *metas, size_t n,
+                           int64_t quarantine_s, char **err_out)
+{
+    bool used[65536] = {0};
+    time_t now = time(NULL);
+
+    /* 1) mark disallowed: active + retired within quarantine */
+    for (size_t i = 0; i < n; ++i) {
+        const mcz_dict_meta_t *m = &metas[i];
+        if (m->id == 0) continue;
+        if (m->retired == 0 || (m->retired > 0 && (now - m->retired) < quarantine_s)) {
+            used[m->id] = true;
+        }
+    }
+
+    /* 2) assign ids for metas lacking one */
+    for (size_t i = 0; i < n; ++i) {
+        mcz_dict_meta_t *m = &metas[i];
+        if (m->id != 0) continue;
+
+        uint16_t pick = 0;
+        for (uint32_t id = 1; id <= 65535; ++id) {
+            if (!used[id]) { pick = (uint16_t)id; used[id] = true; break; }
+        }
+        if (!pick) { set_err(err_out, "ID space exhausted"); return -ENOSPC; }
+
+        m->id = pick;
+        /* immediately persist manifest with assigned id */
+        int rc = mcz_rewrite_manifest((const mcz_dict_meta_t *)m, err_out);
+        if (rc) return rc;
+    }
+    return 0;
+}
+
+
+/* ----------------- PUBLIC API ----------------- */
+
+
+mcz_table_t *mcz_scan_dict_dir(const char *dir,
+                               size_t max_per_ns,
+                               int64_t id_quarantine_s,
+                               char **err_out)
+{
+    if (!dir || !*dir) { set_err(err_out, "scan: empty dir"); return NULL; }
+    if (max_per_ns == 0) max_per_ns = 1;
+
+    DIR *d = opendir(dir);
+    if (!d) { set_err(err_out, "scan: opendir(%s) failed", dir); return NULL; }
+
+    /* -------- Phase 1: collect metas from manifests and load dicts for ACTIVE (not retired) -------- */
+    size_t nmeta = 0, cmeta = 8;
+    mcz_dict_meta_t *metas = (mcz_dict_meta_t*)calloc(cmeta, sizeof(*metas));
+    if (!metas) { closedir(d); set_err(err_out, "scan: OOM spaces"); return NULL; }
+
+    struct dirent *de;
+    //time_t now = time(NULL);
+
+    while ((de = readdir(d))) {
+        const char *name = de->d_name;
+        if (name[0] == '.') continue;
+        size_t ln = strlen(name);
+        if (ln > 3 && strcmp(name + ln - 3, ".mf") == 0) {
+            if (nmeta == cmeta) {
+                size_t nc = cmeta * 2;
+                void *tmp = realloc(metas, nc * sizeof(*metas));
+                if (!tmp) { nmeta = 0; break; }
+                metas = (mcz_dict_meta_t*)tmp; cmeta = nc;
+            }
+
+            char mfpath[PATH_MAX];
+            if (join_path(mfpath, sizeof(mfpath), dir, name)) continue;
+
+            mcz_dict_meta_t *m = &metas[nmeta];
+            memset(m, 0, sizeof(*m));
+
+            if (parse_manifest_file(mfpath, dir, m) == 0) {
+                nmeta++;
+            } else {
+                free_dict_meta(m);
+            }
+        }
+    }
+
+    closedir(d);
+    if (nmeta == 0) { free(metas); set_err(err_out, "scan: no manifests"); return NULL; }
+
+    /* -------- Phase 2: assign IDs (filesystem is source of truth) -------- */
+    {
+        int rc = assign_ids_from_fs(metas, nmeta, id_quarantine_s, err_out);
+        if (rc != 0) {
+            for (size_t i=0;i<nmeta;i++) free_dict_meta(&metas[i]);
+            free(metas);
+            return NULL;
+        }
+    }
+
+    /* -------- Phase 3: group by namespace, sort newest-first -------- */
+    size_t nspaces = 0, cspaces = 8;
+    mcz_ns_entry_t **spaces = (mcz_ns_entry_t**)calloc(cspaces, sizeof(*spaces));
+    if (!spaces) {
+        for (size_t i=0;i<nmeta;i++) free_dict_meta(&metas[i]);
+        free(metas);
+        set_err(err_out, "scan: OOM spaces");
+        return NULL;
+    }
+
+    for (size_t i=0;i<nmeta;i++) {
+        mcz_dict_meta_t *m = &metas[i];
+        size_t npre = (m->nprefixes && m->prefixes) ? m->nprefixes : 1;
+        for (size_t j=0;j<npre;j++) {
+            const char *pref = (m->prefixes && m->prefixes[j]) ? m->prefixes[j] : "global";
+            mcz_ns_entry_t *sp = find_or_add_space(&spaces, &nspaces, &cspaces, pref);
+            if (!sp) continue;
+            size_t nd = sp->ndicts;
+            void *tmp = realloc(sp->dicts, (nd+1) * sizeof(*sp->dicts));
+            if (!tmp) continue;
+            sp->dicts = (mcz_dict_meta_t**)tmp;
+            sp->dicts[nd] = m;
+            sp->ndicts = nd + 1;
+        }
+    }
+
+    for (size_t i=0;i<nspaces;i++) {
+        if (spaces[i]->ndicts > 1) {
+            qsort(spaces[i]->dicts, spaces[i]->ndicts,
+                  sizeof(spaces[i]->dicts[0]), cmp_meta_created_desc);
+        }
+    }
+
+    /* -------- Phase 4: enforce per-namespace limit via retirement -------- */
+    time_t now = time(NULL);
+    for (size_t i=0;i<nspaces;i++) {
+        mcz_ns_entry_t *sp = spaces[i];
+        size_t kept_active = 0;
+        for (size_t k = 0; k < sp->ndicts; ++k) {
+            mcz_dict_meta_t *m = sp->dicts[k];
+            if (m->retired == 0) {
+                if (kept_active < max_per_ns) {
+                    kept_active++;
+                } else {
+                    /* retire overflow (persist to manifest) */
+                    m->retired = now;
+                    (void)mcz_rewrite_manifest(m, err_out); /* best-effort logging inside */
+                }
+            }
+        }
+    }
+
+    /* -------- Phase 5: load ZSTD dicts for ACTIVE metas only -------- */
+    size_t n_active = 0;
+    for (size_t i=0;i<nmeta;i++) if (metas[i].retired == 0) n_active++;
+
+    if (n_active == 0) {
+        for (size_t i=0;i<nspaces;i++) { free(spaces[i]->dicts); free(spaces[i]->prefix); free(spaces[i]); }
+        for (size_t i=0;i<nmeta;i++) free_dict_meta(&metas[i]);
+        free(spaces); free(metas);
+        set_err(err_out, "scan: no active dictionaries after limit enforcement");
+        return NULL;
+    }
+
+    for (size_t i=0;i<nmeta;i++) {
+        mcz_dict_meta_t *m = &metas[i];
+        if (m->retired != 0) continue;
+        size_t dsz = 0;
+        if (load_zstd_dict(m->dict_path, m->level, &m->cdict, &m->ddict, &dsz) == 0) {
+            m->dict_size = dsz;
+        } else {
+            /* If load fails, retire and persist so FS remains the truth */
+            m->retired = now;
+            (void)mcz_rewrite_manifest(m, err_out);
+        }
+    }
+
+    /* -------- Phase 6: build final table (ACTIVE only) -------- */
+    mcz_table_t *tab = (mcz_table_t*)calloc(1, sizeof(*tab));
+    if (!tab) {
+        for (size_t i=0;i<nspaces;i++) { free(spaces[i]->dicts); free(spaces[i]->prefix); free(spaces[i]); }
+        for (size_t i=0;i<nmeta;i++) free_dict_meta(&metas[i]);
+        free(spaces); free(metas);
+        set_err(err_out, "scan: OOM table");
+        return NULL;
+    }
+
+    for (size_t i=0;i<65536;i++) tab->by_id[i] = NULL;
+
+    /* Filter spaces to only active metas */
+    for (size_t i=0;i<nspaces;i++) {
+        mcz_ns_entry_t *sp = spaces[i];
+        size_t w = 0;
+        for (size_t k=0;k<sp->ndicts;k++) {
+            mcz_dict_meta_t *m = sp->dicts[k];
+            if (m->retired == 0) {
+                sp->dicts[w++] = m;
+                /* by_id: newest wins */
+                mcz_dict_meta_t *cur = tab->by_id[m->id];
+                if (!cur || m->created > cur->created) tab->by_id[m->id] = m;
+            }
+        }
+        sp->ndicts = w;
+    }
+
+    tab->spaces   = spaces;
+    tab->nspaces  = nspaces;
+    tab->metas    = metas;
+    tab->nmeta    = nmeta;
+    tab->built_at = now;
+
+    return tab;
+}
+
+/* Find the next available dictionary ID, considering quarantine on retired IDs.
+ * - metas: array of already-parsed manifest metas (filesystem is source of truth)
+ * - n: number of metas
+ * - quarantine_s: seconds; IDs with retired!=0 and (now - retired) < quarantine_s are disallowed
+ * - out_id: on success, set to the chosen ID in [1..65535]
+ * Returns 0 on success; -ENOSPC if no ID free; -EINVAL on bad args.
+ */
+int mcz_next_available_id(const mcz_dict_meta_t *metas, size_t n,
+                          int64_t quarantine_s, uint16_t *out_id, char **err_out)
+{
+    if (!out_id) { set_err(err_out, "next_id: out_id is NULL"); return -EINVAL; }
+
+    bool used[65536];
+    memset(used, 0, sizeof(used));
+
+    time_t now = time(NULL);
+
+    /* Mark disallowed IDs: active OR retired but still within quarantine window. */
+    if (metas && n) {
+        for (size_t i = 0; i < n; ++i) {
+            const mcz_dict_meta_t *m = &metas[i];
+            if (m->retired == 0 || (m->retired > 0 && (now - m->retired) < quarantine_s)) {
+                used[m->id] = true;
+            }
+        }
+    }
+
+    /* Pick the lowest free ID in [1..65535]. */
+    for (uint32_t id = 1; id <= 65535; ++id) {
+        if (!used[id]) {
+            *out_id = (uint16_t)id;
+            return 0;
+        }
+    }
+
+    set_err(err_out, "next_id: no free IDs (all 1..65535 are active or quarantined)");
+    return -ENOSPC;
+}
+
+/* Pick the active dict for a key (Phase-1: longest prefix match; falls back to "global") */
+const mcz_dict_meta_t *mcz_pick_dict(const mcz_table_t *tab, const char *key, size_t klen){
+    if (!tab || !key) return NULL;
+    const mcz_dict_meta_t *fallback = NULL;
+    for (size_t i=0;i<tab->nspaces;i++) {
+        mcz_ns_entry_t *sp = tab->spaces[i];
+        if (!sp->ndicts) continue;
+        if (!strcmp(sp->prefix,"global")) { fallback = sp->dicts[0]; continue; }
+        size_t plen = strlen(sp->prefix);
+        if (plen <= klen && !strncmp(key, sp->prefix, plen)) {
+            return sp->dicts[0];
+        }
+    }
+    return fallback;
+}
+
+const mcz_dict_meta_t *mcz_lookup_by_id(const mcz_table_t *tab, uint16_t id) {
+    if (!tab) return NULL;
+    return tab->by_id[id];
+}
+
+
+/* ------------------------------------------
+ * Optional convenience wrapper:
+ *   - calls both save functions
+ *   - fills out_meta (paths, times, level, namespaces, signature, size)
+ *   - does not create cdict/ddict here
+ * ------------------------------------------ */
+int mcz_save_dictionary_and_manifest(const char *dir,
+                                     uint16_t id,
+                                     const void *dict_data, size_t dict_size,
+                                     const char * const *prefixes, size_t nprefixes,
+                                     int level,
+                                     const char *signature,
+                                     time_t created,
+                                     time_t retired,
+                                     mcz_dict_meta_t *out_meta,
+                                     char **err_out)
+{
+    if (!dir || !*dir || !dict_data || dict_size == 0 || id == 0) {
+        set_err(err_out, "mcz_save_dictionary_and_manifest: invalid arguments");
+        return -EINVAL;
+    }
+
+    char *dict_abs = NULL, *mf_abs = NULL;
+    size_t saved_size = 0;
+    int rc = mcz_save_dict_file(dir, id, dict_data, dict_size, &dict_abs, &saved_size, err_out);
+    if (rc) return rc;
+
+    rc = mcz_save_manifest_file(dir, id, prefixes, nprefixes, level, signature, created, retired, &mf_abs, err_out);
+    if (rc) { free(dict_abs); return rc; }
+
+    if (out_meta) {
+        memset(out_meta, 0, sizeof(*out_meta));
+        out_meta->id        = id;
+        out_meta->dict_path = dict_abs;  /* take ownership */
+        out_meta->mf_path   = mf_abs;    /* take ownership */
+        out_meta->created   = created;
+        out_meta->retired   = retired;
+        out_meta->level     = level;
+        out_meta->dict_size = saved_size;
+
+        /* copy namespaces */
+        if (!prefixes || nprefixes == 0) {
+            out_meta->prefixes = (char**)calloc(1, sizeof(char*));
+            if (!out_meta->prefixes) { set_err(err_out, "mcz_save_dictionary_and_manifest: OOM prefixes"); return -ENOMEM; }
+            out_meta->prefixes[0] = strdup("global");
+            if (!out_meta->prefixes[0]) { set_err(err_out, "mcz_save_dictionary_and_manifest: OOM prefix dup"); return -ENOMEM; }
+            out_meta->nprefixes = 1;
+        } else {
+            out_meta->prefixes = (char**)calloc(nprefixes, sizeof(char*));
+            if (!out_meta->prefixes) { set_err(err_out, "mcz_save_dictionary_and_manifest: OOM prefixes"); return -ENOMEM; }
+            out_meta->nprefixes = nprefixes;
+            for (size_t i = 0; i < nprefixes; ++i) {
+                out_meta->prefixes[i] = strdup(prefixes[i]);
+                if (!out_meta->prefixes[i]) { set_err(err_out, "mcz_save_dictionary_and_manifest: OOM prefix dup"); return -ENOMEM; }
+            }
+        }
+        if (signature && *signature) {
+            out_meta->signature = strdup(signature);
+            if (!out_meta->signature) { set_err(err_out, "mcz_save_dictionary_and_manifest: OOM signature"); return -ENOMEM; }
+        }
+        out_meta->cdict = NULL;
+        out_meta->ddict = NULL;
+    } else {
+        /* Caller didn’t want meta; just free temp paths */
+        free(dict_abs);
+        free(mf_abs);
+    }
+
+    return 0;
+}
+
+/* Deep-copy a meta (strings + prefixes); keep cdict/ddict pointers as given */
+static void meta_deep_copy(mcz_dict_meta_t *dst, const mcz_dict_meta_t *src,
+                           const ZSTD_CDict *cdict, const ZSTD_DDict *ddict)
+{
+    memset(dst, 0, sizeof(*dst));
+    dst->id         = src->id;
+    dst->dict_path  = xstrdup(src->dict_path);
+    dst->mf_path    = xstrdup(src->mf_path);
+    dst->created    = src->created;
+    dst->retired    = src->retired;
+    dst->level      = src->level;
+    dst->signature  = xstrdup(src->signature);
+    dst->dict_size  = src->dict_size;
+    dst->cdict      = cdict ? cdict : src->cdict;
+    dst->ddict      = ddict ? ddict : src->ddict;
+
+    if (src->nprefixes && src->prefixes) {
+        dst->prefixes = (char**)calloc(src->nprefixes, sizeof(char*));
+        if (dst->prefixes) {
+            dst->nprefixes = src->nprefixes;
+            for (size_t i = 0; i < src->nprefixes; ++i)
+                dst->prefixes[i] = xstrdup(src->prefixes[i]);
+        }
+    } else {
+        dst->prefixes = (char**)calloc(1, sizeof(char*));
+        if (dst->prefixes) {
+            dst->prefixes[0] = strdup("global");
+            dst->nprefixes = 1;
+        }
+    }
+}
+
+
+/* push meta pointer to the *end*; we will ensure newest-first later, or we can insert at front */
+static int space_append_meta(mcz_ns_entry_t *sp, mcz_dict_meta_t *m) {
+    mcz_dict_meta_t **newv = (mcz_dict_meta_t**)realloc(sp->dicts, (sp->ndicts + 1) * sizeof(*newv));
+    if (!newv) return -ENOMEM;
+    sp->dicts = newv;
+    sp->dicts[sp->ndicts++] = m;
+    return 0;
+}
+
+
+/* Build a brand-new table = deep copy of old + one extra meta (as newest) */
+/* Build a brand-new table = deep copy of old + one extra meta (as newest),
+ * enforcing max_per_ns per-namespace (0 => unlimited).
+ */
+
+static mcz_ns_entry_t *find_space(mcz_ns_entry_t **spaces, size_t n, const char *pref) {
+    for (size_t i = 0; i < n; ++i) {
+        if (spaces[i] && spaces[i]->prefix && strcmp(spaces[i]->prefix, pref) == 0) return spaces[i];
+    }
+    return NULL;
+}
+
+static mcz_ns_entry_t *add_space(mcz_table_t *tab, const char *pref) {
+    /* grow spaces array by 1 */
+    mcz_ns_entry_t **newv = (mcz_ns_entry_t**)realloc(tab->spaces, (tab->nspaces + 1) * sizeof(*newv));
+    if (!newv) return NULL;
+    tab->spaces = newv;
+
+    mcz_ns_entry_t *sp = (mcz_ns_entry_t*)calloc(1, sizeof(*sp));
+    if (!sp) return NULL;
+    sp->prefix = strdup(pref ? pref : "global");
+    sp->dicts  = NULL;
+    sp->ndicts = 0;
+
+    tab->spaces[tab->nspaces++] = sp;
+    return sp;
+}
+
+mcz_table_t *table_clone_plus(const mcz_table_t *old,
+                                     const mcz_dict_meta_t *new_meta_in,
+                                     const ZSTD_CDict *cdict,
+                                     const ZSTD_DDict *ddict,
+                                     size_t max_per_ns,              
+                                     char **err_out)
+{
+    mcz_table_t *tab = (mcz_table_t*)calloc(1, sizeof(*tab));
+    if (!tab) { set_err(err_out, "table_clone_plus: %s", "OOM: table"); return NULL; }
+
+    const size_t n_old = old ? old->nmeta : 0;
+    tab->metas = (mcz_dict_meta_t*)calloc(n_old + 1, sizeof(mcz_dict_meta_t));
+    if (!tab->metas) { set_err(err_out,"table_clone_plus: %s", "OOM: metas"); free(tab); return NULL; }
+    tab->nmeta = n_old + 1;
+
+    /* Copy old metas first */
+    for (size_t i = 0; i < n_old; ++i) {
+        meta_deep_copy(&tab->metas[i], &old->metas[i], old->metas[i].cdict, old->metas[i].ddict);
+    }
+    /* Append new meta as the newest */
+    meta_deep_copy(&tab->metas[n_old], new_meta_in, cdict, ddict);
+
+    /* by_id: newest wins (new meta last; iterate forward so it overwrites) */
+    for (size_t i = 0; i < 65536; ++i) tab->by_id[i] = NULL;
+    for (size_t i = 0; i < tab->nmeta; ++i) {
+        tab->by_id[ tab->metas[i].id ] = &tab->metas[i];
+    }
+
+    /* rebuild spaces from scratch */
+    tab->spaces = NULL;
+    tab->nspaces = 0;
+    for (size_t i = 0; i < tab->nmeta; ++i) {
+        mcz_dict_meta_t *m = &tab->metas[i];
+        for (size_t j = 0; j < m->nprefixes; ++j) {
+            const char *pref = m->prefixes[j] ? m->prefixes[j] : "global";
+            mcz_ns_entry_t *sp = find_space(tab->spaces, tab->nspaces, pref);
+            if (!sp) {
+                sp = add_space(tab, pref);
+                if (!sp) { set_err(err_out, "table_clone_plus: %s", "OOM: space"); /* leak-safe clean later */ goto fail; }
+            }
+            if (space_append_meta(sp, m) != 0) { set_err(err_out, "table_clone_plus: %s", "OOM: space dicts"); goto fail; }
+        }
+    }
+
+    /* newest-first per namespace, then enforce max_per_ns (trim oldest) */
+    for (size_t i = 0; i < tab->nspaces; ++i) {
+        mcz_ns_entry_t *sp = tab->spaces[i];
+        qsort(sp->dicts, sp->ndicts, sizeof(sp->dicts[0]), cmp_meta_created_desc);
+
+        if (max_per_ns > 0 && sp->ndicts > max_per_ns) {
+            /* Keep newest max_per_ns; drop the tail. We only shrink the view.
+               (Metas stay owned by tab->metas; no frees needed here.) */
+            sp->ndicts = max_per_ns;
+            /* Optional: shrink capacity (not required)
+               sp->dicts = realloc(sp->dicts, sp->ndicts * sizeof(*sp->dicts));
+               (ignore realloc failure; it’s just a capacity hint) */
+        }
+    }
+
+    tab->built_at = time(NULL);
+    tab->gen      = old ? (old->gen + 1) : 1;
+    return tab;
+
+fail:
+    /* best-effort cleanup */
+    if (tab) {
+        if (tab->spaces) {
+            for (size_t i = 0; i < tab->nspaces; ++i) {
+                if (tab->spaces[i]) {
+                    free(tab->spaces[i]->dicts);
+                    free(tab->spaces[i]->prefix);
+                    free(tab->spaces[i]);
+                }
+            }
+            free(tab->spaces);
+        }
+        if (tab->metas) {
+            for (size_t i = 0; i < tab->nmeta; ++i) {
+                free(tab->metas[i].dict_path);
+                free(tab->metas[i].mf_path);
+                if (tab->metas[i].prefixes) {
+                    for (size_t j = 0; j < tab->metas[i].nprefixes; ++j) free(tab->metas[i].prefixes[j]);
+                    free(tab->metas[i].prefixes);
+                }
+                free(tab->metas[i].signature);
+            }
+            free(tab->metas);
+        }
+        free(tab);
+    }
+    return NULL;
+}
+
+/* Mark a dictionary as retired at 'now' and rewrite its manifest.
+   If already retired (retired!=0), it is left as-is. */
+int mcz_mark_dict_retired(mcz_dict_meta_t *meta, time_t now, char **err_out)
+{
+    if (!meta || !meta->dict_path || meta->id == 0) {
+        set_err(err_out, "retire: invalid meta");
+        return -EINVAL;
+    }
+    if (meta->retired != 0) return 0;  /* already retired */
+
+    meta->retired = (now ? now : time(NULL));
+    return mcz_rewrite_manifest(meta, err_out);
+}
+

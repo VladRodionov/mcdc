@@ -279,24 +279,28 @@ static void settings_init(void) {
     settings.sock_cookie_id = 0;
 #endif
 #ifdef USE_ZSTD
+    //TODO: move defaults to mcz_config.h
     settings.mcz_enable_comp = true;
     settings.mcz_enable_dict = true;
     settings.mcz_dict_dir = NULL;
     settings.mcz_dict_size = 256*1024;
     settings.zstd_level = 3;
     settings.mcz_min_size = 32;
-    settings.mcz_max_size = 32*1024;
+    settings.mcz_max_size = 100*1024;
     settings.mcz_min_savings = 0.05;
-    settings.mcz_dict_map = NULL;
 
     settings.mcz_enable_training = true;
-    settings.mcz_retraining_interval_s = 90*60;
-    settings.mcz_min_training_size = 64*1024*1024;
+    settings.mcz_retraining_interval_s = 12*60*60;
+    settings.mcz_min_training_size = 24*1024*1024;
     settings.mcz_ewma_alpha = 0.20;
     settings.mcz_retrain_drop = 0.12;
+    
+    settings.mcz_gc_run_interval = 3600;
+    settings.mcz_gc_cool_period = 3600;
+    settings.mcz_gc_quarantine_period = 3600 * 24 * 7;
 
-    settings.mcz_dict_retain_hours = 24;
-    settings.mcz_dict_retain_max = 8;
+    settings.mcz_dict_retain_hours = 7*24;
+    settings.mcz_dict_retain_max = 10;
 
     settings.mcz_enable_sampling = true;
     settings.mcz_sample_p = 0.02;
@@ -306,7 +310,7 @@ static void settings_init(void) {
     settings.mcz_spool_max_bytes = 4ULL*1024*1024*1024;
     settings.mcz_sample_key_mode = MCZ_KEYMODE_PREFIX;
     settings.mcz_sample_prefix_n = 16;
-    settings.mcz_compress_keys = false; /* -Zk */
+    settings.mcz_compress_keys = false;
 
 #endif
 }
@@ -1535,7 +1539,7 @@ static void complete_nread(conn *c) {
     uint16_t did = 0;                           /* dictionary id          */
 
     /* Try to compress -------------------------------------------------- */
-    ssize_t clen = mcz_maybe_compress(ITEM_data(oit), oit->nbytes,
+    ssize_t clen = mcz_maybe_compress(ITEM_data(oit), oit->nbytes, ITEM_key(oit), oit->nkey,
                                        &cbuf, &did);
 
     if (clen > 0) {             /* Success → store compressed copy */
@@ -6111,6 +6115,7 @@ int main (int argc, char **argv) {
 #endif
 #ifdef USE_ZSTD
     extern mcz_ctx_t g_mcz;
+        //TODO: do we really need to duplicate this configuration on memcached settings?
     if (mcz_cfg_init(&g_mcz.cfg) != 0) {
         fprintf(stderr, "fatal: bad zstd configuration\n");
         exit(EXIT_FAILURE);
