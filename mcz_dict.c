@@ -285,50 +285,6 @@ static char *build_ns_line(const char * const *prefixes, size_t nprefixes) {
     return s;
 }
 
-
-/* Renders manifest text */
-/*static int render_manifest_text(const char *dict_basename,
-                                      const char *ns_line,
-                                      time_t created,
-                                      int level,
-                                      const char *signature,
-                                      time_t retired,
-                                      char **out_text,
-                                      char **err_out)
-{
-    char created_rfc3339[32]; format_rfc3339_utc(created ? created : time(NULL), created_rfc3339);
-    char retired_rfc3339[32] = {0};
-    const char *retired_k = "";
-    if (retired > 0) {
-        format_rfc3339_utc(retired, retired_rfc3339);
-        retired_k = "retired = ";
-    }
-    const char *sig = (signature && *signature) ? signature : NULL;
-
-    size_t cap = 320 + strlen(dict_basename) + strlen(ns_line)
-               + (sig ? strlen(sig) : 0) + (retired > 0 ? strlen(retired_rfc3339) : 0);
-    char *buf = (char*)malloc(cap);
-    if (!buf) { set_err(err_out, "manifest: OOM render"); return -ENOMEM; }
-
-    int n = snprintf(buf, cap,
-        "# MCZ dictionary manifest\n"
-        "dict_file = %s\n"
-        "namespaces = %s\n"
-        "created = %s\n"
-        "level = %d\n"
-        "%s%s%s"
-        "%s%s%s",
-        dict_basename, ns_line, created_rfc3339, level,
-        sig ? "signature = " : "", sig ? sig : "", sig ? "\n" : "",
-        (retired > 0 ? retired_k : ""),
-        (retired > 0 ? retired_rfc3339 : ""),
-        (retired > 0 ? "\n" : ""));
-
-    if (n < 0 || (size_t)n >= cap) { free(buf); set_err(err_out, "manifest: snprintf overflow"); return -EOVERFLOW; }
-    *out_text = buf;
-    return 0;
-}
-*/
 /* Renders manifest text */
 static int render_manifest_text(const char *dict_basename,
                                 uint16_t id,
