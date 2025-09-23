@@ -19,13 +19,14 @@
  * Garbage collector (GC) for retired dictionary tables.
  *
  * Responsibilities:
- *   - Manage lifecycle of old mcz_table_t instances published by the trainer.
+ *   - Manage lifecycle of old mcz_table_t instances published by the trainer
+ *     or provided externally.
  *   - Use an MPSC (multi-producer, single-consumer) stack/queue to enqueue
  *     retired tables safely from publisher threads.
  *   - Run a background GC thread that:
  *       • Waits for a configurable "cooling-off" period (default 1h).
- *       • Frees retired tables once no readers can hold references.
- *       • Optionally removes obsolete .dict / .mf files from disk.
+ *       • Frees retired tables from memory once no readers can hold references.
+ *       • Optionally removes obsolete .dict / .mf files from disk (after "quarantine" period, default is 7d).
  *   - Provide start/stop APIs for GC thread and enqueue APIs for publishers.
  *
  * Design:
@@ -58,6 +59,11 @@
 static inline unsigned get_cool(const mcz_ctx_t *ctx) {
     unsigned v = ctx->cfg.gc_cool_period;
     return v ? v : 3600u; /* default 1h */
+}
+
+static inline unsigned get_quarantine(const mcz_ctx_t *ctx) {
+    unsigned v = ctx->cfg.gc_quarantine_period;
+    return v ? v : 3600u * 7 * 24; /* default 7d */
 }
 
 static void delete_file_if_dead(const char *path) {
@@ -131,52 +137,75 @@ void mcz_free_table(mcz_table_t *tab) {
     free(tab);
 }
 
-/* ---------- GC thread ---------- */
 
+/* Final GC pass: free dict objects after cool-off; delete files after quarantine.
+ * Assumptions:
+ *  - Retirement-time code already dropped pool refs for metas (per-namespace as needed).
+ *  - If is_meta_live_in_current(...) == false, no thread can still hold the table/meta.
+ *  - get_cool(ctx) returns the cool-off (seconds) for memory frees.
+ *  - get_quarantine(ctx) returns FS quarantine (seconds) for file deletion (based on m->retired).
+ */
 static void gc_process_expired_batch(mcz_ctx_t *ctx, mcz_retired_node_t *batch_head) {
-    time_t now = time(NULL);
-    unsigned cool = get_cool(ctx);
+    const time_t now        = time(NULL);
+    const unsigned cool     = get_cool(ctx);
+    const unsigned quarantine = get_quarantine(ctx);
 
-    /* We'll keep not-yet-expired nodes to requeue */
     mcz_retired_node_t *keep_head = NULL;
 
     for (mcz_retired_node_t *n = batch_head; n; ) {
         mcz_retired_node_t *next = n->next;
-        if ((unsigned)(now - n->retired_at) >= cool) {
-            /* Delete obsolete files (not live in CURRENT) */
-            if (n->tab && n->tab->metas) {
-                for (size_t i = 0; i < n->tab->nmeta; ++i) {
-                    mcz_dict_meta_t *m = &n->tab->metas[i];
-                    bool live = is_meta_live_in_current(ctx, m->id, m->dict_path, m->mf_path);
-                    if (!live) {
-                        delete_file_if_dead(m->dict_path);
-                        delete_file_if_dead(m->mf_path);
-                    }
+        bool keep_node = false;
+        /* Wait for table-level cool-off to avoid TLS/reader races. */
+        if ((time_t)cool > 0 && difftime(now, n->retired_at) < (double)cool) {
+            keep_node = true;
+        } else if (n->tab && n->tab->metas) {
+            /* Process each meta in the retired table */
+            for (size_t i = 0; i < n->tab->nmeta; ++i) {
+                mcz_dict_meta_t *m = &n->tab->metas[i];
+                /* If this meta is still live in the current table, defer. */
+                if (is_meta_live_in_current(ctx, m->id, m->dict_path, m->mf_path)) {
+                    keep_node = true;
+                    continue;
+                }
+                /* ---- Free ZSTD dict objects (safe after cool-off & not-live) ---- */
+                if (m->cdict) { ZSTD_freeCDict((ZSTD_CDict*)m->cdict); m->cdict = NULL; }
+                if (m->ddict) { ZSTD_freeDDict((ZSTD_DDict*)m->ddict); m->ddict = NULL; }
+                /* ---- Delete files after dictionary-level quarantine ----
+                 * Use m->retired (time the dict was retired), not the table retirement time.
+                 * If not yet retired at dict level, or quarantine not elapsed, defer.
+                 */
+                if (m->retired == 0 || (quarantine > 0 && difftime(now, m->retired) < (double)quarantine)) {
+                    keep_node = true; /* not eligible for deletion yet */
+                } else {
+                    delete_file_if_dead(m->dict_path);
+                    delete_file_if_dead(m->mf_path);
                 }
             }
-            /* Free the retired table */
+        }
+        if (!keep_node) {
+            /* All metas fully handled: free table & node */
             mcz_free_table(n->tab);
             free(n);
         } else {
-            /* keep for later */
+            /* Requeue for a later GC pass */
             n->next = keep_head;
             keep_head = n;
         }
         n = next;
     }
 
-    /* Requeue kept nodes (MPSC push of a chain: push each is simplest) */
+    /* Requeue kept nodes back to the MPSC stack */
     while (keep_head) {
         mcz_retired_node_t *n = keep_head;
         keep_head = keep_head->next;
-        /* push single node back */
         n->next = NULL;
         mcz_retired_node_t *head;
         do {
             head = atomic_load_explicit(&ctx->gc_retired_head, memory_order_acquire);
             n->next = head;
-        } while (!atomic_compare_exchange_weak_explicit(&ctx->gc_retired_head, &head, n,
-                    memory_order_release, memory_order_acquire));
+        } while (!atomic_compare_exchange_weak_explicit(
+                     &ctx->gc_retired_head, &head, n,
+                     memory_order_release, memory_order_acquire));
     }
 }
 

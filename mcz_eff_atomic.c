@@ -152,8 +152,8 @@ bool mcz_eff_should_retrain(uint64_t now_s)
     }
 
     /* --- Steady state: require relative degradation --- */
-    double rel = (ewma / base) - 1.0; /* >0 => worse compression */
-    return rel >= th;
+    double rel = (ewma / base) - 1.0; /* >0 => worse compression ; < 0 - better compression, but still can be a different workload */
+    return rel >= th || rel <= -th;
 }
 
 /* Trainer thread only: keep baseline non-increasing.

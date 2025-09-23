@@ -50,8 +50,8 @@ void mcz_dict_pool_shutdown(void);
 int mcz_dict_pool_retain_for_meta(mcz_dict_meta_t *m, char **err_out);
 
 
-/* Release one retain for this meta; frees dicts when refcnt reaches 0. */
-void mcz_dict_pool_release_for_meta(const mcz_dict_meta_t *m);
+/* Release one retain for this meta (per namespace). */
+void mcz_dict_pool_release_for_meta(const mcz_dict_meta_t *m, int32_t *ref_left, char **err_out);
 
 /* Return the current reference count for a dictionary meta.
  * If not found in the pool, return -1.

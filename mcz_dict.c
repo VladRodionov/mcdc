@@ -102,7 +102,7 @@ static int parse_manifest_file(const char *mf_path, const char *dir, mcz_dict_me
 
         if (!strcasecmp(key,"id")) {
             long v = strtol(val, NULL, 10);
-            if (v<=0 || v>65535) { rc = -EINVAL; break; }
+            if (v<0 || v>65535) { rc = -EINVAL; break; }
             m->id = (uint16_t)v;
 
         } else if (!strcasecmp(key,"dict_file")) {
@@ -139,26 +139,6 @@ static int parse_manifest_file(const char *mf_path, const char *dir, mcz_dict_me
     fclose(fp);
     if (rc) return rc;
 
-    /* Derive id from filename if missing */
-    if (m->id == 0) {
-        const char *base = strrchr(mf_path,'/'); base = base? base+1 : mf_path;
-        char *dot = strrchr(base,'.');
-        size_t len = dot ? (size_t)(dot - base) : strlen(base);
-        char tmp[32]; if (len >= sizeof(tmp)) return -EINVAL;
-        memcpy(tmp, base, len); tmp[len] = '\0';
-        long v = strtol(tmp, NULL, 10);
-        if (v<=0 || v>65535) return -EINVAL;
-        m->id = (uint16_t)v;
-    }
-
-    /* Default dict_path if missing */
-    if (!m->dict_path) {
-        char buf[PATH_MAX]; char file[32];
-        snprintf(file,sizeof(file),"%" PRIu16 ".dict", m->id);
-        if (join_path(buf,sizeof(buf),dir,file)) return -ENAMETOOLONG;
-        m->dict_path = xstrdup(buf);
-    }
-
     /* Default namespace if missing */
     if (!m->prefixes || m->nprefixes==0) {
         m->prefixes = calloc(1,sizeof(char*));
@@ -166,7 +146,7 @@ static int parse_manifest_file(const char *mf_path, const char *dir, mcz_dict_me
         m->prefixes[0] = xstrdup("global");
         m->nprefixes = 1;
     }
-
+    
     return 0;
 }
 
@@ -210,8 +190,6 @@ static void free_dict_meta(mcz_dict_meta_t *m){
     memset(m,0,sizeof(*m));
 }
 
-
-
 /* ---- helpers ---- */
 
 static mcz_ns_entry_t *find_or_add_space(mcz_ns_entry_t ***spaces, size_t *nspaces, size_t *cspaces, const char *pref) {
@@ -239,32 +217,33 @@ static int cmp_meta_created_desc(const void *a, const void *b) {
 }
 
 /* -------------------------
- * Part 1: write <dir>/<id>.dict
+ * Part 1: write dictionary file
  * ------------------------- */
+
+/* Writes <dir>/<uuid>.dict (UUID v4). Returns absolute path and dict size. */
 static int mcz_save_dict_file(const char *dir,
-                       uint16_t id,
                        const void *dict_data, size_t dict_size,
-                       char **out_abs_path,   /* optional: strdup of absolute dict path */
-                       size_t *out_dict_size, /* optional: echo of dict_size */
+                       char **out_abs_path,        /* optional */
+                       char **out_dict_basename,   /* optional: "<uuid>.dict" */
+                       size_t *out_dict_size,      /* optional */
                        char **err_out)
 {
-    if (!dir || !*dir || !dict_data || dict_size == 0 || id == 0) {
+    if (!dir || !*dir || !dict_data || dict_size == 0) {
         set_err(err_out, "mcz_save_dict_file: invalid arguments");
         return -EINVAL;
     }
 
-    /* Build target absolute path: <dir>/<id>.dict */
-    char file_dict[32];
-    snprintf(file_dict, sizeof(file_dict), "%" PRIu16 ".dict", id);
+    char dict_base[64];
+    int rc = make_uuid_basename("dict", dict_base, err_out);
+    if (rc) return rc;
 
     char dict_path[PATH_MAX];
-    if (join_path(dict_path, sizeof(dict_path), dir, file_dict) != 0) {
-        set_err(err_out, "mcz_save_dict_file: dict path too long");
+    if (join_path(dict_path, sizeof(dict_path), dir, dict_base) != 0) {
+        set_err(err_out, "mcz_save_dict_file: path too long");
         return -ENAMETOOLONG;
     }
 
-    /* Write atomically */
-    int rc = atomic_write_file(dir, dict_path, dict_data, dict_size, 0644, err_out);
+    rc = atomic_write_file(dir, dict_path, dict_data, dict_size, 0644, err_out);
     if (rc != 0) {
         if (!*err_out) set_err(err_out, "mcz_save_dict_file: atomic_write_file failed");
         return rc;
@@ -272,10 +251,11 @@ static int mcz_save_dict_file(const char *dir,
 
     if (out_abs_path) {
         *out_abs_path = strdup(dict_path);
-        if (!*out_abs_path) {
-            set_err(err_out, "mcz_save_dict_file: OOM duplicating dict path");
-            return -ENOMEM;
-        }
+        if (!*out_abs_path) { set_err(err_out, "mcz_save_dict_file: OOM abs path"); return -ENOMEM; }
+    }
+    if (out_dict_basename) {
+        *out_dict_basename = strdup(dict_base);
+        if (!*out_dict_basename) { set_err(err_out, "mcz_save_dict_file: OOM basename"); return -ENOMEM; }
     }
     if (out_dict_size) *out_dict_size = dict_size;
 
@@ -283,7 +263,7 @@ static int mcz_save_dict_file(const char *dir,
 }
 
 /* -------------------------
- * Part 2: write <dir>/<id>.mf
+ * Part 2: write <dir>/<uuid>.mf
  *   - prefixes may be NULL/0 => "global"
  *   - signature optional (may be NULL/empty)
  *   - created: pass 0 to use current time
@@ -305,73 +285,105 @@ static char *build_ns_line(const char * const *prefixes, size_t nprefixes) {
     return s;
 }
 
-static int render_manifest_text(uint16_t id,
-                                const char *dict_basename,
-                                const char *ns_line,
-                                time_t created,
-                                int level,
-                                const char *signature,
-                                time_t retired,              /* NEW */
-                                char **out_text,
-                                char **err_out)
+
+/* Renders manifest text */
+/*static int render_manifest_text(const char *dict_basename,
+                                      const char *ns_line,
+                                      time_t created,
+                                      int level,
+                                      const char *signature,
+                                      time_t retired,
+                                      char **out_text,
+                                      char **err_out)
 {
     char created_rfc3339[32]; format_rfc3339_utc(created ? created : time(NULL), created_rfc3339);
     char retired_rfc3339[32] = {0};
-    const char *retired_kv = "";
+    const char *retired_k = "";
     if (retired > 0) {
         format_rfc3339_utc(retired, retired_rfc3339);
-        retired_kv = "retired = ";
+        retired_k = "retired = ";
     }
-
     const char *sig = (signature && *signature) ? signature : NULL;
 
     size_t cap = 320 + strlen(dict_basename) + strlen(ns_line)
-                 + (sig ? strlen(sig) : 0) + (retired > 0 ? strlen(retired_rfc3339) : 0);
+               + (sig ? strlen(sig) : 0) + (retired > 0 ? strlen(retired_rfc3339) : 0);
     char *buf = (char*)malloc(cap);
     if (!buf) { set_err(err_out, "manifest: OOM render"); return -ENOMEM; }
 
     int n = snprintf(buf, cap,
         "# MCZ dictionary manifest\n"
-        "id = %" PRIu16 "\n"
         "dict_file = %s\n"
         "namespaces = %s\n"
         "created = %s\n"
         "level = %d\n"
-        "%s%s%s"       /* signature line */
-        "%s%s%s",      /* retired line */
-        id, dict_basename, ns_line, created_rfc3339, level,
+        "%s%s%s"
+        "%s%s%s",
+        dict_basename, ns_line, created_rfc3339, level,
         sig ? "signature = " : "", sig ? sig : "", sig ? "\n" : "",
-        (retired > 0 ? retired_kv : ""),
+        (retired > 0 ? retired_k : ""),
         (retired > 0 ? retired_rfc3339 : ""),
         (retired > 0 ? "\n" : ""));
-    if (n < 0 || (size_t)n >= cap) { free(buf); set_err(err_out, "manifest: snprintf overflow"); return -EOVERFLOW; }
 
+    if (n < 0 || (size_t)n >= cap) { free(buf); set_err(err_out, "manifest: snprintf overflow"); return -EOVERFLOW; }
     *out_text = buf;
     return 0;
 }
-/* Derive "<dir>/<id>.mf" given dir+id. */
-static int make_mf_path_from_dir_id(const char *dir, uint16_t id, char *out, size_t outlen, char **err_out){
-    char file_mf[32];
-    snprintf(file_mf, sizeof(file_mf), "%" PRIu16 ".mf", id);
-    if (join_path(out, outlen, dir, file_mf) != 0) {
-        set_err(err_out, "manifest: path too long");
-        return -ENAMETOOLONG;
-    }
-    return 0;
-}
+*/
+/* Renders manifest text */
+static int render_manifest_text(const char *dict_basename,
+                                uint16_t id,
+                                const char *ns_line,
+                                time_t created,
+                                int level,
+                                const char *signature,
+                                time_t retired,
+                                char **out_text,
+                                char **err_out)
+{
+    char created_rfc3339[32];
+    format_rfc3339_utc(created ? created : time(NULL), created_rfc3339);
 
-/* Derive "<...>.mf" from "<...>.dict" absolute path. */
-static int make_mf_path_from_dict_path(const char *dict_path, char *out, size_t outlen, char **err_out){
-    if (!dict_path || !*dict_path) { set_err(err_out, "manifest: empty dict_path"); return -EINVAL; }
-    const char *ext = strrchr(dict_path, '.');
-    if (!ext || strcmp(ext, ".dict") != 0) {
-        set_err(err_out, "manifest: dict_path must end with .dict");
-        return -EINVAL;
+    char retired_rfc3339[32] = {0};
+    const char *retired_k = "";
+    if (retired > 0) {
+        format_rfc3339_utc(retired, retired_rfc3339);
+        retired_k = "retired = ";
     }
-    size_t len = (size_t)(ext - dict_path);
-    if (len + 3 >= outlen) { set_err(err_out, "manifest: path too long"); return -ENAMETOOLONG; }
-    memcpy(out, dict_path, len);
-    strcpy(out + len, ".mf");
+
+    const char *sig = (signature && *signature) ? signature : NULL;
+
+    size_t cap = 360 + strlen(dict_basename) + strlen(ns_line)
+               + (sig ? strlen(sig) : 0)
+               + (retired > 0 ? strlen(retired_rfc3339) : 0);
+
+    char *buf = (char*)malloc(cap);
+    if (!buf) {
+        set_err(err_out, "manifest: OOM render");
+        return -ENOMEM;
+    }
+
+    int n = snprintf(buf, cap,
+        "# MCZ dictionary manifest\n"
+        "dict_file = %s\n"
+        "namespaces = %s\n"
+        "created = %s\n"
+        "level = %d\n"
+        "id = %u\n"
+        "%s%s%s"
+        "%s%s%s",
+        dict_basename, ns_line, created_rfc3339, level, id,
+        sig ? "signature = " : "", sig ? sig : "", sig ? "\n" : "",
+        (retired > 0 ? retired_k : ""),
+        (retired > 0 ? retired_rfc3339 : ""),
+        (retired > 0 ? "\n" : ""));
+
+    if (n < 0 || (size_t)n >= cap) {
+        free(buf);
+        set_err(err_out, "manifest: snprintf overflow");
+        return -EOVERFLOW;
+    }
+
+    *out_text = buf;
     return 0;
 }
 
@@ -381,38 +393,50 @@ static const char *basename_from_path(const char *path){
     return slash ? slash + 1 : path;
 }
 
-/* Save <dir>/<id>.mf using provided attributes. */
+/* Writes <dir>/<uuid>.mf that points to the given dict basename (<uuid>.dict).
+   No ID is saved in the manifest (IDs are assigned during reload). */
 static int mcz_save_manifest_file(const char *dir,
-                           uint16_t id,
+                           const char *dict_basename,            /* "<uuid>.dict" */
                            const char * const *prefixes, size_t nprefixes,
                            int level,
-                           const char *signature,
-                           time_t created,
-                           time_t retired,
-                           char **out_abs_path,
+                           const char *signature,                /* optional */
+                           time_t created,                       /* 0 => now */
+                           time_t retired,                       /* 0 => active */
+                           char **out_abs_path,                  /* optional */
                            char **err_out)
 {
-    if (!dir || !*dir || id == 0) { set_err(err_out, "manifest: invalid args"); return -EINVAL; }
+    if (!dir || !*dir || !dict_basename || !*dict_basename) {
+        set_err(err_out, "manifest: invalid args");
+        return -EINVAL;
+    }
+    size_t dblen = strlen(dict_basename);
+    if (dblen < 6 || strcmp(dict_basename + dblen - 5, ".dict") != 0) {
+        set_err(err_out, "manifest: dict_basename must end with .dict");
+        return -EINVAL;
+    }
 
     /* ns line */
     char *ns_line = build_ns_line(prefixes, nprefixes);
     if (!ns_line) { set_err(err_out, "manifest: OOM namespaces"); return -ENOMEM; }
 
-    /* dict basename is "<id>.dict" */
-    char dict_file[32];
-    snprintf(dict_file, sizeof(dict_file), "%" PRIu16 ".dict", id);
-
-    /* render text */
+    /* render (no id line) */
     char *mf_text = NULL;
-    int rc = render_manifest_text(id, dict_file, ns_line, created, level, signature, retired, &mf_text, err_out);
+    int rc = render_manifest_text(dict_basename, 0, ns_line, created, level, signature, retired, &mf_text, err_out);
     if (rc) { free(ns_line); return rc; }
 
-    /* path */
-    char mf_path[PATH_MAX];
-    rc = make_mf_path_from_dir_id(dir, id, mf_path, sizeof(mf_path), err_out);
-    if (rc) { free(ns_line); free(mf_text); return rc; }
+    /* manifest basename: same UUID, ".mf" */
+    char mf_base[64];
+    memcpy(mf_base, dict_basename, dblen - 5);
+    mf_base[dblen - 5] = '\0';
+    strncat(mf_base, ".mf", sizeof(mf_base) - (dblen - 5) - 1);
 
-    /* atomic write */
+    char mf_path[PATH_MAX];
+    if (join_path(mf_path, sizeof(mf_path), dir, mf_base) != 0) {
+        free(ns_line); free(mf_text);
+        set_err(err_out, "manifest: path too long");
+        return -ENAMETOOLONG;
+    }
+
     rc = atomic_write_text(dir, mf_path, mf_text, err_out);
     if (rc) { free(ns_line); free(mf_text); return rc; }
 
@@ -426,42 +450,50 @@ static int mcz_save_manifest_file(const char *dir,
     return 0;
 }
 
-/* Rewrite manifest next to an existing <...>.dict from meta. */
+/* Rewrite the manifest at meta->mf_path using fields from meta.
+ * - No `id =` line (IDs are assigned on reload).
+ * - Uses dict basename from meta->dict_path for `dict_file = ...`.
+ */
 static int mcz_rewrite_manifest(const mcz_dict_meta_t *meta, char **err_out)
 {
-    if (!meta || !meta->dict_path || meta->id == 0) {
-        set_err(err_out, "manifest: invalid meta");
+    if (!meta || !meta->mf_path || !*meta->mf_path || !meta->dict_path || !*meta->dict_path) {
+        set_err(err_out, "manifest: invalid meta (missing mf_path/dict_path)");
         return -EINVAL;
     }
 
-    /* ns line from meta */
-    char *ns_line = build_ns_line((const char* const*)meta->prefixes, meta->nprefixes);
+    /* namespaces line */
+    char *ns_line = build_ns_line((const char * const*)meta->prefixes, meta->nprefixes);
     if (!ns_line) { set_err(err_out, "manifest: OOM namespaces"); return -ENOMEM; }
 
-    /* dict basename */
+    /* dict basename for `dict_file = ...` */
     const char *dict_base = basename_from_path(meta->dict_path);
 
-    /* render text */
+    /* render manifest text (no id= line) */
     char *mf_text = NULL;
-    int rc = render_manifest_text(meta->id, dict_base, ns_line,
-                                  meta->created ? meta->created : time(NULL),
-                                  meta->level, meta->signature, meta->retired, &mf_text, err_out);
+    int rc = render_manifest_text(
+                 dict_base,
+                 meta->id,
+                 ns_line,
+                 meta->created ? meta->created : time(NULL),
+                 meta->level,
+                 meta->signature,
+                 meta->retired,
+                 &mf_text,
+                 err_out);
     if (rc) { free(ns_line); return rc; }
 
-    /* derive manifest path from dict_path */
-    char mf_path[PATH_MAX];
-    rc = make_mf_path_from_dict_path(meta->dict_path, mf_path, sizeof(mf_path), err_out);
-    if (rc) { free(ns_line); free(mf_text); return rc; }
+    /* compute directory for atomic write from meta->mf_path */
+    char *pathdup = strdup(meta->mf_path);
+    if (!pathdup) { free(ns_line); free(mf_text); set_err(err_out, "manifest: OOM path dup"); return -ENOMEM; }
 
-    /* compute dir for atomic_write_text */
-    char *dirdup = strdup(meta->dict_path);
-    if (!dirdup) { free(ns_line); free(mf_text); set_err(err_out, "manifest: OOM path dup"); return -ENOMEM; }
-    char *slash = strrchr(dirdup, '/');
-    if (slash) *slash = '\0'; else strcpy(dirdup, ".");
+    char *slash = strrchr(pathdup, '/');
+    if (slash) *slash = '\0';
+    else strcpy(pathdup, "."); /* relative dir */
 
-    rc = atomic_write_text(dirdup, mf_path, mf_text, err_out);
+    /* write atomically to the absolute mf_path already provided */
+    rc = atomic_write_text(pathdup, meta->mf_path, mf_text, err_out);
 
-    free(dirdup);
+    free(pathdup);
     free(ns_line);
     free(mf_text);
     return rc;
@@ -510,19 +542,18 @@ mcz_table_t *mcz_scan_dict_dir(const char *dir,
                                int64_t id_quarantine_s,
                                char **err_out)
 {
-    if (!dir || !*dir) { set_err(err_out, "scan: empty dir"); return NULL; }
+    if (!dir || !*dir) { set_err(err_out, "mcz_scan_dict_dir: empty dir"); return NULL; }
     if (max_per_ns == 0) max_per_ns = 1;
 
     DIR *d = opendir(dir);
-    if (!d) { set_err(err_out, "scan: opendir(%s) failed", dir); return NULL; }
+    if (!d) { set_err(err_out, "mcz_scan_dict_dir: opendir(%s) failed", dir); return NULL; }
 
-    /* -------- Phase 1: collect metas from manifests and load dicts for ACTIVE (not retired) -------- */
+    /* -------- Phase 1: collect metas from manifests  -------- */
     size_t nmeta = 0, cmeta = 8;
     mcz_dict_meta_t *metas = (mcz_dict_meta_t*)calloc(cmeta, sizeof(*metas));
-    if (!metas) { closedir(d); set_err(err_out, "scan: OOM spaces"); return NULL; }
+    if (!metas) { closedir(d); set_err(err_out, "mcz_scan_dict_dir: OOM spaces"); return NULL; }
 
     struct dirent *de;
-    //time_t now = time(NULL);
 
     while ((de = readdir(d))) {
         const char *name = de->d_name;
@@ -541,17 +572,17 @@ mcz_table_t *mcz_scan_dict_dir(const char *dir,
 
             mcz_dict_meta_t *m = &metas[nmeta];
             memset(m, 0, sizeof(*m));
-
             if (parse_manifest_file(mfpath, dir, m) == 0) {
                 nmeta++;
             } else {
+                /*DEBUG*/ fprintf(stderr, "parse manifest file failed %s: %s\n", dir, mfpath);
                 free_dict_meta(m);
             }
         }
     }
 
     closedir(d);
-    if (nmeta == 0) { free(metas); set_err(err_out, "scan: no manifests"); return NULL; }
+    if (nmeta == 0) { free(metas); set_err(err_out, "mcz_scan_dict_dir: no manifests"); return NULL; }
 
     /* -------- Phase 2: assign IDs (filesystem is source of truth) -------- */
     {
@@ -569,7 +600,7 @@ mcz_table_t *mcz_scan_dict_dir(const char *dir,
     if (!spaces) {
         for (size_t i=0;i<nmeta;i++) free_dict_meta(&metas[i]);
         free(metas);
-        set_err(err_out, "scan: OOM spaces");
+        set_err(err_out, "mcz_scan_dict_dir: OOM spaces");
         return NULL;
     }
 
@@ -607,9 +638,12 @@ mcz_table_t *mcz_scan_dict_dir(const char *dir,
                 if (kept_active < max_per_ns) {
                     kept_active++;
                 } else {
-                    /* retire overflow (persist to manifest) */
-                    m->retired = now;
-                    (void)mcz_rewrite_manifest(m, err_out); /* best-effort logging inside */
+                    int32_t ref_left;
+                    mcz_dict_pool_release_for_meta(m, &ref_left, err_out);
+                    if (ref_left == 0) {
+                        /* retire overflow (persist to manifest) */
+                        mcz_mark_dict_retired(m, now, err_out);
+                    }
                 }
             }
         }
@@ -623,7 +657,7 @@ mcz_table_t *mcz_scan_dict_dir(const char *dir,
         for (size_t i=0;i<nspaces;i++) { free(spaces[i]->dicts); free(spaces[i]->prefix); free(spaces[i]); }
         for (size_t i=0;i<nmeta;i++) free_dict_meta(&metas[i]);
         free(spaces); free(metas);
-        set_err(err_out, "scan: no active dictionaries after limit enforcement");
+        set_err(err_out, "mcz_scan_dict_dir: no active dictionaries after limit enforcement");
         return NULL;
     }
 
@@ -633,10 +667,11 @@ mcz_table_t *mcz_scan_dict_dir(const char *dir,
         size_t dsz = 0;
         if (load_zstd_dict(m->dict_path, m->level, &m->cdict, &m->ddict, &dsz) == 0) {
             m->dict_size = dsz;
+            // As a side effect this function can update both: CDict and DDict references
+            mcz_dict_pool_retain_for_meta(m, err_out);
         } else {
             /* If load fails, retire and persist so FS remains the truth */
-            m->retired = now;
-            (void)mcz_rewrite_manifest(m, err_out);
+            mcz_mark_dict_retired(m, now, err_out);
         }
     }
 
@@ -646,7 +681,7 @@ mcz_table_t *mcz_scan_dict_dir(const char *dir,
         for (size_t i=0;i<nspaces;i++) { free(spaces[i]->dicts); free(spaces[i]->prefix); free(spaces[i]); }
         for (size_t i=0;i<nmeta;i++) free_dict_meta(&metas[i]);
         free(spaces); free(metas);
-        set_err(err_out, "scan: OOM table");
+        set_err(err_out, "mcz_scan_dict_dir: OOM table");
         return NULL;
     }
 
@@ -673,7 +708,6 @@ mcz_table_t *mcz_scan_dict_dir(const char *dir,
     tab->metas    = metas;
     tab->nmeta    = nmeta;
     tab->built_at = now;
-
     return tab;
 }
 
@@ -745,35 +779,56 @@ const mcz_dict_meta_t *mcz_lookup_by_id(const mcz_table_t *tab, uint16_t id) {
  *   - does not create cdict/ddict here
  * ------------------------------------------ */
 int mcz_save_dictionary_and_manifest(const char *dir,
-                                     uint16_t id,
                                      const void *dict_data, size_t dict_size,
                                      const char * const *prefixes, size_t nprefixes,
                                      int level,
                                      const char *signature,
-                                     time_t created,
-                                     time_t retired,
+                                     time_t created,      /* 0 => now */
+                                     time_t retired,      /* 0 => active */
                                      mcz_dict_meta_t *out_meta,
                                      char **err_out)
 {
-    if (!dir || !*dir || !dict_data || dict_size == 0 || id == 0) {
+    if (!dir || !*dir || !dict_data || dict_size == 0) {
         set_err(err_out, "mcz_save_dictionary_and_manifest: invalid arguments");
         return -EINVAL;
     }
 
-    char *dict_abs = NULL, *mf_abs = NULL;
+    char *dict_abs = NULL;
+    char *dict_base = NULL;   /* "<uuid>.dict" */
+    char *mf_abs = NULL;
     size_t saved_size = 0;
-    int rc = mcz_save_dict_file(dir, id, dict_data, dict_size, &dict_abs, &saved_size, err_out);
-    if (rc) return rc;
 
-    rc = mcz_save_manifest_file(dir, id, prefixes, nprefixes, level, signature, created, retired, &mf_abs, err_out);
-    if (rc) { free(dict_abs); return rc; }
+    /* 1) Save the dictionary bytes to <dir>/<uuid>.dict */
+    int rc = mcz_save_dict_file(dir,
+                                dict_data, dict_size,
+                                &dict_abs,           /* out abs path */
+                                &dict_base,          /* out "<uuid>.dict" */
+                                &saved_size,
+                                err_out);
+    if (rc) goto fail;
 
+    /* Use a consistent timestamp if caller passed 0 */
+    time_t ts_created = created ? created : time(NULL);
+
+    /* 2) Save the manifest <dir>/<uuid>.mf pointing to dict_base */
+    rc = mcz_save_manifest_file(dir,
+                                dict_base,
+                                prefixes, nprefixes,
+                                level,
+                                signature,
+                                ts_created,
+                                retired,
+                                &mf_abs,
+                                err_out);
+    if (rc) goto fail;
+
+    /* 3) Fill out_meta (without ID; assigned at reload) */
     if (out_meta) {
         memset(out_meta, 0, sizeof(*out_meta));
-        out_meta->id        = id;
-        out_meta->dict_path = dict_abs;  /* take ownership */
-        out_meta->mf_path   = mf_abs;    /* take ownership */
-        out_meta->created   = created;
+        out_meta->id        = 0;        /* assigned later during reload */
+        out_meta->dict_path = dict_abs; /* take ownership */
+        out_meta->mf_path   = mf_abs;   /* take ownership */
+        out_meta->created   = ts_created;
         out_meta->retired   = retired;
         out_meta->level     = level;
         out_meta->dict_size = saved_size;
@@ -781,32 +836,48 @@ int mcz_save_dictionary_and_manifest(const char *dir,
         /* copy namespaces */
         if (!prefixes || nprefixes == 0) {
             out_meta->prefixes = (char**)calloc(1, sizeof(char*));
-            if (!out_meta->prefixes) { set_err(err_out, "mcz_save_dictionary_and_manifest: OOM prefixes"); return -ENOMEM; }
+            if (!out_meta->prefixes) { set_err(err_out, "mcz_save_dictionary_and_manifest: OOM prefixes"); rc = -ENOMEM; goto fail_free_temp; }
             out_meta->prefixes[0] = strdup("global");
-            if (!out_meta->prefixes[0]) { set_err(err_out, "mcz_save_dictionary_and_manifest: OOM prefix dup"); return -ENOMEM; }
+            if (!out_meta->prefixes[0]) { set_err(err_out, "mcz_save_dictionary_and_manifest: OOM prefix dup"); rc = -ENOMEM; goto fail_free_temp; }
             out_meta->nprefixes = 1;
         } else {
             out_meta->prefixes = (char**)calloc(nprefixes, sizeof(char*));
-            if (!out_meta->prefixes) { set_err(err_out, "mcz_save_dictionary_and_manifest: OOM prefixes"); return -ENOMEM; }
+            if (!out_meta->prefixes) { set_err(err_out, "mcz_save_dictionary_and_manifest: OOM prefixes"); rc = -ENOMEM; goto fail_free_temp; }
             out_meta->nprefixes = nprefixes;
             for (size_t i = 0; i < nprefixes; ++i) {
                 out_meta->prefixes[i] = strdup(prefixes[i]);
-                if (!out_meta->prefixes[i]) { set_err(err_out, "mcz_save_dictionary_and_manifest: OOM prefix dup"); return -ENOMEM; }
+                if (!out_meta->prefixes[i]) { set_err(err_out, "mcz_save_dictionary_and_manifest: OOM prefix dup"); rc = -ENOMEM; goto fail_free_temp; }
             }
         }
+
         if (signature && *signature) {
             out_meta->signature = strdup(signature);
-            if (!out_meta->signature) { set_err(err_out, "mcz_save_dictionary_and_manifest: OOM signature"); return -ENOMEM; }
+            if (!out_meta->signature) { set_err(err_out, "mcz_save_dictionary_and_manifest: OOM signature"); rc = -ENOMEM; goto fail_free_temp; }
         }
+
+        /* cdict/ddict are not created/owned here */
         out_meta->cdict = NULL;
         out_meta->ddict = NULL;
     } else {
-        /* Caller didn’t want meta; just free temp paths */
+        /* Caller didn’t want meta; free temp paths we allocated */
         free(dict_abs);
         free(mf_abs);
     }
 
+    /* done; free transient basename buffer */
+    free(dict_base);
     return 0;
+
+fail_free_temp:
+    /* If out_meta partially filled, caller's usual free_dict_meta() will clean it up;
+       here we only free transient locals on error */
+    if (!out_meta) {
+        free(dict_abs);
+        free(mf_abs);
+    }
+fail:
+    free(dict_base);
+    return rc;
 }
 
 /* Deep-copy a meta (strings + prefixes); keep cdict/ddict pointers as given */
@@ -852,7 +923,6 @@ static int space_append_meta(mcz_ns_entry_t *sp, mcz_dict_meta_t *m) {
 }
 
 
-/* Build a brand-new table = deep copy of old + one extra meta (as newest) */
 /* Build a brand-new table = deep copy of old + one extra meta (as newest),
  * enforcing max_per_ns per-namespace (0 => unlimited).
  */

@@ -43,6 +43,18 @@
 #include <stdatomic.h>
 #include <sys/time.h>
 
+// Thread-local state (must be seeded once per thread)
+static __thread uint32_t rnd_state = 2463534242u; // arbitrary nonzero seed
+
+uint32_t fast_rand32(void) {
+    uint32_t x = rnd_state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    rnd_state = x;
+    return x;
+}
+
 /* Portable timegm fallback (assumes tm is UTC) */
 static inline time_t timegm_fallback(struct tm *tm) {
     char *old = getenv("TZ");
@@ -281,5 +293,39 @@ int str_to_u16(const char *s, uint16_t *out) {
     if (*end || v <= 0 || v > 0xFFFF)
         return -EINVAL;
     *out = (uint16_t) v;
+    return 0;
+}
+
+/* RFC 4122 UUID v4 string: 36 chars + NUL (8-4-4-4-12) */
+int uuidv4_string(char out[37]) {
+    unsigned char r[16];
+    FILE *fp = fopen("/dev/urandom", "rb");
+    if (!fp) return -1;
+    size_t n = fread(r, 1, sizeof(r), fp);
+    fclose(fp);
+    if (n != sizeof(r)) return -1;
+
+    /* Set version (4) and variant (10x) bits */
+    r[6] = (unsigned char)((r[6] & 0x0F) | 0x40);
+    r[8] = (unsigned char)((r[8] & 0x3F) | 0x80);
+
+    static const char *hex = "0123456789abcdef";
+    int p = 0, i = 0;
+    for (; i < 16; ++i) {
+        out[p++] = hex[(r[i] >> 4) & 0xF];
+        out[p++] = hex[r[i] & 0xF];
+        if (i==3 || i==5 || i==7 || i==9) out[p++] = '-';
+    }
+    out[36] = '\0';
+    return 0;
+}
+
+/* Build "<uuid>.<ext>" into 'out' (PATH-safe join done by caller). */
+int make_uuid_basename(const char *ext, char out[64], char **err_out) {
+    if (!ext || !*ext) { set_err(err_out, "uuid: empty extension"); return -EINVAL; }
+    char u[37];
+    if (uuidv4_string(u) != 0) { set_err(err_out, "uuid: generation failed"); return -EIO; }
+    int n = snprintf(out, 64, "%s.%s", u, ext);
+    if (n <= 0 || n >= 64) { set_err(err_out, "uuid: basename overflow"); return -EOVERFLOW; }
     return 0;
 }

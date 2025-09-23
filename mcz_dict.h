@@ -86,7 +86,6 @@ const mcz_dict_meta_t *mcz_pick_dict(const mcz_table_t *tab, const char *key, si
 const mcz_dict_meta_t *mcz_lookup_by_id(const mcz_table_t *tab, uint16_t id);
 
 int mcz_save_dictionary_and_manifest(const char *dir,
-                                     uint16_t id,
                                      const void *dict_data, size_t dict_size,
                                      const char * const *prefixes, size_t nprefixes,
                                      int level,

@@ -78,11 +78,11 @@ typedef struct mcz_retired_node_s {
 
 /* ---------- global context -------------------------------------------- */
 typedef struct mcz_ctx_s {
-    _Atomic(sample_node_t *) samples_head; /* MPSC list head (push-only) */
-    _Atomic(size_t) bytes_pending; /* atomically updated         */
+    _Atomic(sample_node_t *) samples_head;        /* MPSC list head (push-only) */
+    _Atomic(size_t) bytes_pending;                /* atomically updated         */
     //TODO: not used
     pthread_t trainer_tid;
-    mcz_cfg_t cfg;
+    mcz_cfg_t cfg;                                /* mcz configuration */
     _Atomic(uintptr_t) dict_table;                /* Current dictionary routing table */
     _Atomic(mcz_retired_node_t*) gc_retired_head; /* MPSC stack head */
     _Atomic(bool)               gc_stop;          /* signal to stop GC thread */
@@ -91,7 +91,7 @@ typedef struct mcz_ctx_s {
 
 } mcz_ctx_t;
 
-/* ---- Thread-local cache: add generation + slots ---- */
+/* ---- Thread-local cache ---- */
 typedef struct tls_cache_s {
     ZSTD_CCtx *cctx;
     ZSTD_DCtx *dctx;

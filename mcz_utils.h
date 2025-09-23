@@ -120,4 +120,10 @@ int parse_rfc3339_utc(const char *s, time_t *out);
 
 int split_prefixes(char *csv, char ***out, size_t *nout);
 
+int uuidv4_string(char out[37]);
+
+int make_uuid_basename(const char *ext, char out[64], char **err_out);
+
+uint32_t fast_rand32(void);
+
 #endif /* MCZ_UTILS_H */

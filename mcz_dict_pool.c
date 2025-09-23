@@ -163,7 +163,7 @@ int mcz_dict_pool_retain_for_meta(mcz_dict_meta_t *m, char **err_out)
     return 0;
 }
 
-void mcz_dict_pool_release_for_meta(const mcz_dict_meta_t *m) {
+void mcz_dict_pool_release_for_meta(const mcz_dict_meta_t *m, int32_t *ref_left, char **err_out) {
     if (!m) return;
     char *key = make_key_from_meta(m);
     if (!key) return;
@@ -174,13 +174,11 @@ void mcz_dict_pool_release_for_meta(const mcz_dict_meta_t *m) {
 
     if (e) {
         uint32_t left = atomic_fetch_sub_explicit(&e->refcnt, 1, memory_order_acq_rel) - 1;
+        *ref_left = left;
         if (left == 0) {
             /* unlink */
             if (prev) prev->next = e->next; else g_head = e->next;
             pthread_mutex_unlock(&g_lock);
-
-            if (e->cdict) ZSTD_freeCDict((ZSTD_CDict*)e->cdict);
-            if (e->ddict) ZSTD_freeDDict((ZSTD_DDict*)e->ddict);
             free(e->key);
             free(e);
             free(key);
