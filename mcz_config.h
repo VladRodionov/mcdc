@@ -57,7 +57,7 @@ typedef struct {
     int32_t gc_cool_period;         // default, 1h - time to keep retired dictionary data in memory
     int32_t gc_quarantine_period;    // default: 7d, time to keep retired dictionary in a file system
     // Retention
-    int      dict_retain_hours;     // keep dicts <= N hours
+    int      dict_retain_hours;     // keep dicts <= N hours (not used)
     int      dict_retain_max;       // cap count of resident old dicts
 
     // Sampling + Spool
@@ -67,8 +67,6 @@ typedef struct {
     size_t   sample_roll_bytes;     // rotate when >=
     char    *spool_dir;             // path
     size_t   spool_max_bytes;       // cap; drop-oldest windows
-    //enum { MCZ_KEYMODE_RAW=0, MCZ_KEYMODE_PREFIX=1, MCZ_KEYMODE_HASH=2 } sample_key_mode;
-    //int      sample_prefix_n;       // valid if KEYMODE_PREFIX
 } mcz_cfg_t;
 
 /* --------------------------------------------------------------------

@@ -594,7 +594,7 @@ mcz_table_t *mcz_scan_dict_dir(const char *dir,
                 if (kept_active < max_per_ns) {
                     kept_active++;
                 } else {
-                    int32_t ref_left;
+                    int32_t ref_left = -1; 
                     mcz_dict_pool_release_for_meta(m, &ref_left, err_out);
                     if (ref_left == 0) {
                         /* retire overflow (persist to manifest) */

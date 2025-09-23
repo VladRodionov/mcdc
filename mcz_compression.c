@@ -404,6 +404,25 @@ static void* trainer_main(void *arg) {
     /* never reached */
 }
 
+static int mcz_start_trainer(mcz_ctx_t *ctx){
+    if (!ctx)
+        return -ENOMEM;
+    if (!ctx->cfg.enable_comp){
+        return 0;
+    }
+    if (ctx->cfg.enable_training && ctx->cfg.enable_dict){
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+        pthread_create(&ctx->trainer_tid, &attr, trainer_main, ctx);
+        pthread_attr_destroy(&attr);
+        if (settings.verbose > 1) {
+            log_rate_limited(1000000ULL,
+                             "mcz-dict: trainer thread started (max_dict=%zu B)\n", ctx->cfg.dict_size);
+        }
+    }
+}
+
 /* ---------- public init / destroy ----------------------------------- */
 int mcz_init(mcz_cfg_t *cfg) {
     mcz_ctx_t *ctx = mcz_ctx_mut();
@@ -445,16 +464,7 @@ int mcz_init(mcz_cfg_t *cfg) {
     /* ---------------- init retired dictionaries pool ----------------------*/
     mcz_dict_pool_init();
     /* ---------------- spawn background trainer --------------------------- */
-    
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    pthread_create(&ctx->trainer_tid, &attr, trainer_main, ctx);
-    pthread_attr_destroy(&attr);
-    if (settings.verbose > 1) {
-        log_rate_limited(1000000ULL,
-                         "mcz-dict: trainer thread started (max_dict=%zu B)\n", ctx->cfg.dict_size);
-    }
+    mcz_start_trainer(ctx);
     /* ---------------- spawn background garbage collector --------------------------- */
     mcz_gc_start(ctx);
     if (settings.verbose > 1) {
