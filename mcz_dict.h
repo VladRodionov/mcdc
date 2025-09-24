@@ -80,6 +80,7 @@ typedef struct mcz_table_s {
 mcz_table_t *mcz_scan_dict_dir(const char *dir,
                                size_t max_per_ns,
                                int64_t id_quarantine_s,
+                               int comp_level,
                                char **err_out);
 
 const mcz_dict_meta_t *mcz_pick_dict(const mcz_table_t *tab, const char *key, size_t klen);

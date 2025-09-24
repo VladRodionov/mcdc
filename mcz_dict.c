@@ -496,6 +496,7 @@ static int assign_ids_from_fs(mcz_dict_meta_t *metas, size_t n,
 mcz_table_t *mcz_scan_dict_dir(const char *dir,
                                size_t max_per_ns,
                                int64_t id_quarantine_s,
+                               int comp_level,
                                char **err_out)
 {
     if (!dir || !*dir) { set_err(err_out, "mcz_scan_dict_dir: empty dir"); return NULL; }
@@ -621,7 +622,7 @@ mcz_table_t *mcz_scan_dict_dir(const char *dir,
         mcz_dict_meta_t *m = &metas[i];
         if (m->retired != 0) continue;
         size_t dsz = 0;
-        if (load_zstd_dict(m->dict_path, m->level, &m->cdict, &m->ddict, &dsz) == 0) {
+        if (load_zstd_dict(m->dict_path, comp_level, &m->cdict, &m->ddict, &dsz) == 0) {
             m->dict_size = dsz;
             // As a side effect this function can update both: CDict and DDict references
             mcz_dict_pool_retain_for_meta(m, err_out);

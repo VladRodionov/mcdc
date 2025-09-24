@@ -123,19 +123,11 @@ static int parse_frac(const char *val, double *out) {
     *out = d;
     return 0;
 }
+static int parse_train_mode(const char *val, mcz_train_mode_t *out) {
+    if (!val || !*val) { *out = MCZ_TRAIN_FAST; return 0; }
+    if (!strcasecmp(val, "fast"))     { *out = MCZ_TRAIN_FAST;     return 0; }
+    if (!strcasecmp(val, "optimize")) { *out = MCZ_TRAIN_OPTIMIZE; return 0; }
 
-/* key mode: raw | prefix:N | hash */
-static int parse_key_mode(const char *val, int *mode, int *n_out) {
-    if (!val) return -EINVAL;
-    if (!strcasecmp(val,"raw"))  { *mode = MCZ_KEYMODE_RAW; *n_out = 0; return 0; }
-    if (!strcasecmp(val,"hash")) { *mode = MCZ_KEYMODE_HASH; *n_out = 0; return 0; }
-    if (!strncasecmp(val,"prefix:",7)) {
-        const char *p = val + 7;
-        if (!*p) return -EINVAL;
-        char *end; long n = strtol(p, &end, 10);
-        if (p == end || *end || n <= 0 || n > 4096) return -EINVAL;
-        *mode = MCZ_KEYMODE_PREFIX; *n_out = (int)n; return 0;
-    }
     return -EINVAL;
 }
 
@@ -259,6 +251,11 @@ int parse_mcz_config(const char *path)
         } else if (strcasecmp(key, "mcz.retrain_drop") == 0) {
             double d; if (parse_frac(val, &d)) { fprintf(stderr, "%s:%d: bad retrain_drop '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             settings.mcz_retrain_drop = d;
+            
+        } else if (!strcasecmp(key, "mcz.train_mode")) {
+            mcz_train_mode_t mode;
+            if(parse_train_mode(val, &mode)) { fprintf(stderr, "%s:%d: bad train_mode'%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue;}
+            settings.mcz_train_mode = mode;
         } else if (strcasecmp(key, "mcz.gc_run_interval") == 0) {
                 int64_t s; if (parse_duration_sec(val, &s)) { fprintf(stderr, "%s:%d: bad gc_run_interval '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
                 settings.mcz_gc_run_interval = s;
@@ -306,11 +303,6 @@ int parse_mcz_config(const char *path)
             int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad spool_max_bytes '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             settings.mcz_spool_max_bytes = (size_t)v;
 
-        } else if (strcasecmp(key, "mcz.sample_key_mode") == 0) {
-            int mode, n; if (parse_key_mode(val, &mode, &n)) { fprintf(stderr, "%s:%d: bad sample_key_mode '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-            settings.mcz_sample_key_mode = mode; settings.mcz_sample_prefix_n = n;
-
-            /* Unknown */
         } else if (strcasecmp(key, "compress_keys") == 0) {
             /* legacy: ignored in MCZ; accept to avoid breaking configs */
             fprintf(stderr, "%s:%d: NOTE: 'compress_keys' ignored\n", path, ln);

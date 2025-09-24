@@ -30,6 +30,7 @@
  *   - Always validate dictionary IDs and namespaces before use.
  */
 #include "mcz_compression.h"
+#define ZDICT_STATIC_LINKING_ONLY
 
 #include <pthread.h>
 #include <stdio.h>          /* FILE, fopen, fread, fclose */
@@ -171,6 +172,7 @@ mcz_cfg_init(mcz_cfg_t *cfg)
     cfg->min_training_size = settings.mcz_min_training_size;
     cfg->ewma_alpha = settings.mcz_ewma_alpha;
     cfg->retrain_drop = settings.mcz_retrain_drop;
+    cfg->train_mode = settings.mcz_train_mode;
     
     /* 7. Garbage collection */
     cfg->gc_run_interval = settings.mcz_gc_run_interval;
@@ -226,7 +228,7 @@ static int mcz_load_dicts(void) {
     }
     char *err = NULL;
     mcz_table_t *tab = mcz_scan_dict_dir(ctx->cfg.dict_dir, ctx->cfg.dict_retain_max,
-                                         ctx->cfg.gc_quarantine_period, &err);
+                                         ctx->cfg.gc_quarantine_period, ctx->cfg.zstd_level, &err);
     if (err != NULL){
         fprintf(stderr, "load dictionaries failed: %s\n", err ? err : "unknown error");
         free(err);
@@ -253,6 +255,64 @@ static inline void set_training_active(bool active){
 }
 
 
+static size_t train_fastcover(void* dictBuf, size_t dictCap,
+                            const void* samplesBuf, const size_t* sampleSizes, unsigned nbSamples)
+{
+
+    size_t got = ZDICT_trainFromBuffer(
+        dictBuf, dictCap, samplesBuf, sampleSizes, nbSamples);
+
+    /* p now holds the chosen k,d,steps */
+    return got; /* check ZDICT_isError(got) / ZDICT_getErrorName(got) */
+}
+
+
+static size_t train_fastcover_optimize(void* dictBuf, size_t dictCap,
+                                const void* samplesBuf, const size_t* sampleSizes, unsigned nbSamples)
+{
+    int targetLevel = mcz_ctx()->cfg.zstd_level;
+    ZDICT_fastCover_params_t p;                /* advanced; requires ZDICT_STATIC_LINKING_ONLY */
+    memset(&p, 0, sizeof(p));                  /* 0 => defaults; also enables search for k/d/steps */
+    /* Leave at 0 to ENABLE search (fastCover’s optimizer will vary these) */
+    p.k     = 0;   /* segment size */
+    p.d     = 0;   /* dmer size    */
+    p.steps = 0;   /* number of k points to try */
+
+    /* fastCover-specific knobs */
+    p.f     = 0;   /* log2(feature-buckets). 0 = let optimizer choose; note memory ~ 6*2^f per thread */
+    p.accel = 0;   /* 0 = default (1); higher is faster/less accurate */
+    p.nbThreads = 1;       /* grows memory per thread */
+    p.splitPoint = 0.0;    /* 0.0 → default 0.75/0.25 split */
+
+    /* Optional shrink-to-fit dictionary selection */
+    p.shrinkDict = 0;                 /* 1 = try smaller dict sizes */
+    p.shrinkDictMaxRegression = 0;    /* % regression allowed vs max dict */
+
+    /* Header / stats options */
+    p.zParams.compressionLevel   = targetLevel;
+    p.zParams.notificationLevel  = 0;
+    p.zParams.dictID             = 0;
+
+    size_t got = ZDICT_optimizeTrainFromBuffer_fastCover(
+        dictBuf, dictCap, samplesBuf, sampleSizes, nbSamples, &p);
+
+    return got; /* check ZDICT_isError(got) */
+}
+
+static size_t train_dictionary(void* dictBuf, size_t dictCap,
+                                const void* samplesBuf, const size_t* sampleSizes, unsigned nbSamples)
+{
+    const mcz_ctx_t *ctx = mcz_ctx();
+    mcz_train_mode_t mode = ctx->cfg.train_mode;
+    if (mode == MCZ_TRAIN_FAST) {
+        return train_fastcover(dictBuf, dictCap,
+                                    samplesBuf, sampleSizes, nbSamples);
+    } else {
+        return train_fastcover_optimize(dictBuf, dictCap,
+                                    samplesBuf, sampleSizes, nbSamples);
+    }
+}
+
 /* ---------- trainer thread ------------------------------------------ */
 static void* trainer_main(void *arg) {
     mcz_ctx_t *ctx = arg;
@@ -261,7 +321,7 @@ static void* trainer_main(void *arg) {
         ctx->cfg.min_training_size ? ctx->cfg.min_training_size : max_dict * 100; /* 100× rule */
 
     for (;;) {
-        usleep(100000); // 100 ms
+        usleep(1000000); // 100 ms
 
         bool need_training = false;
         bool success = false;
@@ -272,11 +332,13 @@ static void* trainer_main(void *arg) {
         } else if (mcz_eff_should_retrain((uint64_t)time(NULL))) {
             need_training = true;
         }
+
         if (need_training) set_training_active(true);
         if (!is_training_active()) continue;
 
         /* Threshold gate */
         size_t pending = atomic_load_explicit(&ctx->bytes_pending, memory_order_acquire);
+
         if (pending < train_threshold) continue;
 
         /* Take ownership of sample list */
@@ -339,9 +401,8 @@ static void* trainer_main(void *arg) {
             atomic_fetch_sub_explicit(&ctx->bytes_pending, dec, memory_order_acq_rel);
             continue;
         }
-
-        size_t dict_sz = ZDICT_trainFromBuffer(dict, max_dict, buff, sizes, count);
-
+        size_t dict_sz = train_dictionary(dict, max_dict, buff, sizes, count);
+        
         if (ZSTD_isError(dict_sz)) {
             if (settings.verbose > 1) {
                 log_rate_limited(10ULL * 1000000ULL,
@@ -421,6 +482,7 @@ static int mcz_start_trainer(mcz_ctx_t *ctx){
                              "mcz-dict: trainer thread started (max_dict=%zu B)\n", ctx->cfg.dict_size);
         }
     }
+    return 0;
 }
 
 /* ---------- public init / destroy ----------------------------------- */
@@ -755,7 +817,7 @@ int mcz_reload_dictionaries(void)
     const char *dir = ctx->cfg.dict_dir;
     char *err = NULL;
     mcz_table_t *newtab = mcz_scan_dict_dir(dir, ctx->cfg.dict_retain_max,
-                                         ctx->cfg.gc_quarantine_period, &err);
+                                         ctx->cfg.gc_quarantine_period, ctx->cfg.zstd_level, &err);
     if (err != NULL){
         fprintf(stderr, "reload dictionaries failed: %s\n", err ? err : "unknown error");
         free(err);

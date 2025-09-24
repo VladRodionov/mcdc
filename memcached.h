@@ -598,6 +598,7 @@ struct settings {
     size_t   mcz_min_training_size;     // bytes of eligible data since last train
     double   mcz_ewma_alpha;            // 0..1
     double   mcz_retrain_drop;          // 0..1
+    mcz_train_mode_t mcz_train_mode;
     // GC
     int32_t      mcz_gc_run_interval;
     int32_t      mcz_gc_cool_period;
@@ -613,8 +614,7 @@ struct settings {
     size_t   mcz_sample_roll_bytes;     // rotate when >=
     char    *mcz_spool_dir;             // path
     size_t   mcz_spool_max_bytes;       // cap; drop-oldest windows
-    enum { MCZ_KEYMODE_RAW=0, MCZ_KEYMODE_PREFIX=1, MCZ_KEYMODE_HASH=2 } mcz_sample_key_mode;
-    int      mcz_sample_prefix_n;       // valid if KEYMODE_PREFIX
+    
 #endif
 };
 

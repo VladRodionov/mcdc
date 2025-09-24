@@ -34,6 +34,12 @@
  * User-tunable parameters for the zstd integration
  * (keep in sync with mcz_compression.h)
  * ------------------------------------------------------------------ */
+
+typedef enum {
+    MCZ_TRAIN_FAST = 0,
+    MCZ_TRAIN_OPTIMIZE = 1,
+} mcz_train_mode_t;
+
 typedef struct {
     // Core
     bool     enable_comp;           // default true
@@ -52,6 +58,8 @@ typedef struct {
     size_t   min_training_size;     // bytes of eligible data since last train
     double   ewma_alpha;            // 0..1
     double   retrain_drop;          // 0..1
+    mcz_train_mode_t train_mode;    // COVER (default) or FASTCOVER
+    
     // GC
     int32_t gc_run_interval;
     int32_t gc_cool_period;         // default, 1h - time to keep retired dictionary data in memory

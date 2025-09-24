@@ -290,10 +290,11 @@ static void settings_init(void) {
     settings.mcz_min_savings = 0.05;
 
     settings.mcz_enable_training = true;
-    settings.mcz_retraining_interval_s = 12*60*60;
-    settings.mcz_min_training_size = 24*1024*1024;
-    settings.mcz_ewma_alpha = 0.20;
-    settings.mcz_retrain_drop = 0.12;
+    settings.mcz_retraining_interval_s = 2*60*60; 
+    settings.mcz_min_training_size = 0;
+    settings.mcz_ewma_alpha = 0.05;
+    settings.mcz_retrain_drop = 0.1;
+    settings.mcz_train_mode = MCZ_TRAIN_FAST;
     
     settings.mcz_gc_run_interval = 3600;
     settings.mcz_gc_cool_period = 3600;
@@ -308,8 +309,6 @@ static void settings_init(void) {
     settings.mcz_sample_roll_bytes = 32*1024*1024;
     settings.mcz_spool_dir = NULL;
     settings.mcz_spool_max_bytes = 4ULL*1024*1024*1024;
-    settings.mcz_sample_key_mode = MCZ_KEYMODE_PREFIX;
-    settings.mcz_sample_prefix_n = 16;
     settings.mcz_compress_keys = false;
 
 #endif
