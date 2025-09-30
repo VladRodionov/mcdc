@@ -145,5 +145,6 @@ int mcz_get_stats_snapshot(mcz_stats_snapshot_t *snap, const char *ns, size_t ns
 
 const char ** mcz_list_namespaces(size_t *count);
 
+mcz_cfg_t * mcz_config_get(void);
 
 #endif /* MCZ_COMPRESSION_H */

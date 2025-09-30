@@ -14,6 +14,162 @@
 #define COMMAND_TOKEN 0
 #define SUBCOMMAND_TOKEN 1
 
+
+/* Map train mode to string */
+static const char *train_mode_str(mcz_train_mode_t m) {
+    switch (m) {
+    case MCZ_TRAIN_FAST:     return "FAST";
+    case MCZ_TRAIN_OPTIMIZE: return "OPTIMIZE";
+    default:                 return "UNKNOWN";
+    }
+}
+
+static inline const char *b2s(bool v) { return v ? "true" : "false"; }
+
+/* ---------- ASCII builder: "CFG key value" per line + END ---------- */
+static int build_cfg_ascii(char **outp, size_t *lenp) {
+    mcz_cfg_t *c = mcz_config_get();
+    if (!c) return -1;
+
+    /* Estimate generously to avoid multiple reallocs. */
+    size_t cap = 2048;
+    char *buf = (char *)malloc(cap);
+    if (!buf) return -ENOMEM;
+    size_t off = 0;
+
+#define APP(...) do { \
+        int need = snprintf(NULL, 0, __VA_ARGS__); \
+        if (need < 0) { free(buf); return -1; } \
+        size_t need_sz = (size_t)need; \
+        if (off + need_sz + 1 > cap) { \
+            size_t ncap = (cap * 2 > off + need_sz + 64) ? cap * 2 : off + need_sz + 64; \
+            char *nb = (char *)realloc(buf, ncap); \
+            if (!nb) { free(buf); return -1; } \
+            buf = nb; cap = ncap; \
+        } \
+        off += (size_t)sprintf(buf + off, __VA_ARGS__); \
+    } while (0)
+
+    APP("CFG enable_comp %s\r\n", b2s(c->enable_comp));
+    APP("CFG enable_dict %s\r\n", b2s(c->enable_dict));
+    APP("CFG dict_dir %s\r\n", c->dict_dir ? c->dict_dir : "");
+    APP("CFG dict_size %zu\r\n", c->dict_size);
+    APP("CFG zstd_level %d\r\n", c->zstd_level);
+    APP("CFG min_comp_size %zu\r\n", c->min_comp_size);
+    APP("CFG max_comp_size %zu\r\n", c->max_comp_size);
+    APP("CFG min_savings %.6f\r\n", c->min_savings);
+    APP("CFG compress_keys %s\r\n", b2s(c->compress_keys));
+
+    APP("CFG enable_training %s\r\n", b2s(c->enable_training));
+    APP("CFG retraining_interval_s %" PRId64 "\r\n", (int64_t)c->retraining_interval_s);
+    APP("CFG min_training_size %zu\r\n", c->min_training_size);
+    APP("CFG ewma_alpha %.6f\r\n", c->ewma_alpha);
+    APP("CFG retrain_drop %.6f\r\n", c->retrain_drop);
+    APP("CFG train_mode %s\r\n", train_mode_str(c->train_mode));
+
+    APP("CFG gc_run_interval %d\r\n", c->gc_run_interval);
+    APP("CFG gc_cool_period %d\r\n", c->gc_cool_period);
+    APP("CFG gc_quarantine_period %d\r\n", c->gc_quarantine_period);
+    APP("CFG dict_retain_hours %d\r\n", c->dict_retain_hours);
+    APP("CFG dict_retain_max %d\r\n", c->dict_retain_max);
+
+    APP("CFG enable_sampling %s\r\n", b2s(c->enable_sampling));
+    APP("CFG sample_p %.6f\r\n", c->sample_p);
+    APP("CFG sample_window_sec %d\r\n", c->sample_window_sec);
+    APP("CFG sample_roll_bytes %zu\r\n", c->sample_roll_bytes);
+    APP("CFG spool_dir %s\r\n", c->spool_dir ? c->spool_dir : "");
+    APP("CFG spool_max_bytes %zu\r\n", c->spool_max_bytes);
+
+    APP("END\r\n");
+
+#undef APP
+
+    *outp = buf; *lenp = off;
+    return 0;
+}
+
+/* ---------- JSON builder: compact JSON ---------- */
+/* (Binary uses this JSON as the value; ASCII can request it via 'mcz config json') */
+static int build_cfg_json(char **outp, size_t *lenp) {
+    mcz_cfg_t *c = mcz_config_get();
+    if (!c) return -1;
+
+    /* crude escape: assume paths don’t contain embedded quotes/newlines;
+       if they might, add a tiny JSON-escape helper. */
+    const char *dict_dir = c->dict_dir ? c->dict_dir : "";
+    const char *spool_dir= c->spool_dir ? c->spool_dir : "";
+
+    size_t cap = 2048;
+    char *buf = (char *)malloc(cap);
+    if (!buf) return -ENOMEM;
+
+    int n = snprintf(buf, cap,
+        "{\r\n"
+        "\"enable_comp\":%s,\r\n"
+        "\"enable_dict\":%s,\r\n"
+        "\"dict_dir\":\"%s\",\r\n"
+        "\"dict_size\":%zu,\r\n"
+        "\"zstd_level\":%d,\r\n"
+        "\"min_comp_size\":%zu,\r\n"
+        "\"max_comp_size\":%zu,\r\n"
+        "\"min_savings\":%.6f,\r\n"
+        "\"compress_keys\":%s,\r\n"
+
+        "\"enable_training\":%s,\r\n"
+        "\"retraining_interval_s\":%" PRId64 ",\r\n"
+        "\"min_training_size\":%zu,\r\n"
+        "\"ewma_alpha\":%.6f,\r\n"
+        "\"retrain_drop\":%.6f,\r\n"
+        "\"train_mode\":\"%s\",\r\n"
+
+        "\"gc_run_interval\":%d,\r\n"
+        "\"gc_cool_period\":%d,\r\n"
+        "\"gc_quarantine_period\":%d,\r\n"
+        "\"dict_retain_hours\":%d,\r\n"
+        "\"dict_retain_max\":%d,\r\n"
+
+        "\"enable_sampling\":%s,\r\n"
+        "\"sample_p\":%.6f,\r\n"
+        "\"sample_window_sec\":%d,\r\n"
+        "\"sample_roll_bytes\":%zu,\r\n"
+        "\"spool_dir\":\"%s\",\r\n"
+        "\"spool_max_bytes\":%zu\r\n"
+        "}\r\n",
+        b2s(c->enable_comp),
+        b2s(c->enable_dict),
+        dict_dir,
+        c->dict_size,
+        c->zstd_level,
+        c->min_comp_size,
+        c->max_comp_size,
+        c->min_savings,
+        b2s(c->compress_keys),
+
+        b2s(c->enable_training),
+        (int64_t)c->retraining_interval_s,
+        c->min_training_size,
+        c->ewma_alpha,
+        c->retrain_drop,
+        train_mode_str(c->train_mode),
+
+        c->gc_run_interval,
+        c->gc_cool_period,
+        c->gc_quarantine_period,
+        c->dict_retain_hours,
+        c->dict_retain_max,
+
+        b2s(c->enable_sampling),
+        c->sample_p,
+        c->sample_window_sec,
+        c->sample_roll_bytes,
+        spool_dir,
+        c->spool_max_bytes
+    );
+
+    *outp = buf; *lenp = (size_t)n;
+    return 0;
+}
+
 /* Small helper: write a dynamic response safely */
 static void write_buf(conn *c, const char *buf, size_t len) {
     /* memcached has helpers; write_and_free() takes ownership */
@@ -24,7 +180,7 @@ static void write_buf(conn *c, const char *buf, size_t len) {
     write_and_free(c, out, len);
 }
 
-static int dump_ascii_into_buf(char **outp, size_t *lenp,
+static int build_stats_ascii(char **outp, size_t *lenp,
                                 const char *ns, const mcz_stats_snapshot_t *s)
 {
     /* Reserve a reasonable buffer; grow if needed. */
@@ -98,7 +254,7 @@ static int dump_ascii_into_buf(char **outp, size_t *lenp,
     return 0;
 }
 
-static int dump_json_into_buf(char **outp, size_t *lenp,
+static int build_stats_json(char **outp, size_t *lenp,
                                const char *ns, const mcz_stats_snapshot_t *s)
 {
     size_t cap = 4096;
@@ -224,11 +380,42 @@ void process_mcz_command_ascii(conn *c, token_t *tokens, const size_t ntokens)
         return;
     }
 
-    const char *sub = (ntokens > 2) ? tokens[COMMAND_TOKEN + 1].value : NULL;
-    if (!sub) {
-        out_string(c, "CLIENT_ERROR usage: mcz <stats|ns> ...");
+    if (ntokens < 3) {
+        out_string(c, "CLIENT_ERROR usage: mcz <stats|ns|config> [json]");
         return;
     }
+
+    const char *sub = tokens[COMMAND_TOKEN + 1].value;
+
+    /* --- mcz config [json] --- */
+    if (strcmp(sub, "config") == 0) {
+        int want_json = 0;
+        if (ntokens >= 4) {
+            const char *arg = tokens[COMMAND_TOKEN + 2].value;
+            if (strcmp(arg, "json") == 0){
+                want_json = 1;
+            } else {
+                out_string(c, "CLIENT_ERROR bad command");
+                return;
+            }
+        }
+
+        char *payload = NULL; size_t plen = 0;
+        int rc = want_json ? build_cfg_json(&payload, &plen)
+                           : build_cfg_ascii(&payload, &plen);
+        if (rc != 0 || !payload) {
+            if (rc != -ENOMEM){
+                out_string(c, "SERVER_ERROR config serialization failed");
+            } else {
+                out_string(c, "SERVER_ERROR memory allocation failed");
+            }
+            return;
+        }
+        /* write_and_free takes ownership */
+        write_and_free(c, payload, (int)plen);
+        return;
+    }
+
 
     /* mcz ns */
     if (strcmp(sub, "ns") == 0) {
@@ -285,9 +472,9 @@ void process_mcz_command_ascii(conn *c, token_t *tokens, const size_t ntokens)
     char *out = NULL; size_t len = 0;
     
     if (want_json) {
-       rc = dump_json_into_buf(&out, &len, ns ? ns : "global", &snap);
+       rc = build_stats_json(&out, &len, ns ? ns : "global", &snap);
     } else {
-       rc = dump_ascii_into_buf(&out, &len, ns ? ns : "global", &snap);
+       rc = build_stats_ascii(&out, &len, ns ? ns : "global", &snap);
     }
     if (rc < 0) { out_string(c, "SERVER_ERROR memory allocation failed"); return; }
     if (!out) { out_string(c, "SERVER_ERROR serialization failed"); return; }
@@ -296,6 +483,51 @@ void process_mcz_command_ascii(conn *c, token_t *tokens, const size_t ntokens)
     free(out);
 }
 
+void process_mcz_cfg_bin(conn *c)
+{
+    const protocol_binary_request_header *req = &c->binary_header;
+
+    /* In 1.6.38, these are host-order already */
+    uint8_t  extlen  = req->request.extlen;
+    uint16_t keylen  = req->request.keylen;
+    uint32_t bodylen = req->request.bodylen;
+
+    /* Expect no body for this op */
+    if (extlen != 0 || keylen != 0 || bodylen != 0) {
+        write_bin_error(c, PROTOCOL_BINARY_RESPONSE_EINVAL, NULL, 0);
+        return;
+    }
+
+    /* Build JSON payload */
+    char *payload = NULL; size_t plen = 0;
+    if (build_cfg_json(&payload, &plen) != 0 || !payload) {
+        write_bin_error(c, PROTOCOL_BINARY_RESPONSE_EINVAL, NULL, 0);
+        return;
+    }
+
+    /* Compose response header + value into one contiguous buffer */
+    size_t total = sizeof(protocol_binary_response_header) + plen;
+    char *resp = (char *)malloc(total);
+    if (!resp) { free(payload); write_bin_error(c, PROTOCOL_BINARY_RESPONSE_ENOMEM, NULL, 0); return; }
+
+    protocol_binary_response_header h;
+    memset(&h, 0, sizeof(h));
+    h.response.magic    = PROTOCOL_BINARY_RES;
+    h.response.opcode   = PROTOCOL_BINARY_CMD_MCZ_CFG;   /* 0xE3 */
+    h.response.keylen   = 0;
+    h.response.extlen   = 0;
+    h.response.datatype = PROTOCOL_BINARY_RAW_BYTES;
+    h.response.status   = PROTOCOL_BINARY_RESPONSE_SUCCESS;
+    h.response.bodylen  = (uint32_t)plen;                /* host-order; core swaps on send */
+    h.response.opaque   = req->request.opaque;
+    h.response.cas      = 0;
+
+    memcpy(resp, &h, sizeof(h));
+    if (plen) memcpy(resp + sizeof(h), payload, plen);
+    free(payload);
+
+    write_and_free(c, resp, (int)total);
+}
 
 void process_mcz_stats_bin(conn *c)
 {
@@ -319,6 +551,10 @@ void process_mcz_stats_bin(conn *c)
         const char *body = (const char *)c->rbuf + sizeof(protocol_binary_request_header);
         ns    = body + extlen;      /* start of key */
         nslen = (size_t)keylen;     /* not NUL-terminated */
+        if ((nslen == sizeof("global") - 1) && strncmp ("global", ns, nslen) == 0){
+            ns = NULL;
+            nslen = 0;
+        }
     }
 
     /* Build snapshot (ns==NULL -> global) */
@@ -333,7 +569,7 @@ void process_mcz_stats_bin(conn *c)
     char *payload = NULL;
     size_t plen = 0;
     
-    if (dump_ascii_into_buf(&payload, &plen, ns ? ns : "global", &snap) < 0) {
+    if (build_stats_json(&payload, &plen, ns ? ns : "global", &snap) < 0) {
         write_bin_error(c, PROTOCOL_BINARY_RESPONSE_ENOMEM, NULL, 0);
         return;
     }

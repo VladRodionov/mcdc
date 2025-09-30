@@ -62,6 +62,8 @@ mcz_ctx_t g_mcz = { 0 };      /* zero-init by the loader */
 /* ---------- zstd context helpers ------------------------------------ */
 const mcz_ctx_t *mcz_ctx(void)      { return &g_mcz; }
 mcz_ctx_t       *mcz_ctx_mut(void)  { return &g_mcz; }
+mcz_cfg_t *mcz_config_get(void) { return &g_mcz.cfg; }
+
 
 static const mcz_table_t *mcz_current_table(void) {
     const mcz_ctx_t *ctx = mcz_ctx();
