@@ -1,4 +1,50 @@
-/* mcz_cmd.c */
+/*
+ * Copyright (c) 2025 Vladimir Rodionov
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/*
+ * mcz_cmd.c - Implementation of MCZ command extensions for memcached.
+ *
+ * This file adds support for custom ASCII and binary protocol commands:
+ *
+ *   - "mcz stats [<namespace>|global|default] [json]"
+ *       Dump statistics snapshots in text or JSON form.
+ *
+ *   - "mcz ns"
+ *       List active namespaces, including "global" and "default".
+ *
+ *   - "mcz config [json]"
+ *       Show current configuration, either as text lines or as a JSON object.
+ *
+ *   - PROTOCOL_BINARY_CMD_MCZ_STATS (0xE1)
+ *       Binary version of "mcz stats".
+ *
+ *   - PROTOCOL_BINARY_CMD_MCZ_NS (0xE2)
+ *       Binary namespace listing.
+ *
+ *   - PROTOCOL_BINARY_CMD_MCZ_CFG (0xE3)
+ *       Binary configuration dump.
+ *
+ * Each handler builds the appropriate payload (text lines or JSON),
+ * attaches it to a memcached response, and writes it back through
+ * the standard connection send path.
+ *
+ * Thread safety:
+ *   Commands only read from stats and configuration structures.
+ *   Updates are synchronized in other modules; this code assumes
+ *   point-in-time snapshots are safe to serialize.
+ */
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
