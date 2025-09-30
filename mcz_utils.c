@@ -227,7 +227,7 @@ char *mcz_join_namespaces(const char * const *prefixes, size_t nprefixes,
 
     /* default if none provided */
     if (!prefixes || nprefixes == 0) {
-        char *s = strdup("global");
+        char *s = strdup("default");
         return s; /* may be NULL on OOM */
     }
 
@@ -329,3 +329,72 @@ int make_uuid_basename(const char *ext, char out[64], char **err_out) {
     if (n <= 0 || n >= 64) { set_err(err_out, "uuid: basename overflow"); return -EOVERFLOW; }
     return 0;
 }
+
+inline uint64_t fnv1a64(const char *s) {
+    uint64_t h = 1469598103934665603ull;
+    for (; *s; ++s) { h ^= (unsigned char)*s; h *= 1099511628211ull; }
+    return h;
+}
+
+/* allocate zeroed, or return NULL */
+inline void *xzmalloc(size_t n) { void *p = calloc(1, n); return p; }
+
+// Increment an _Atomic uint32_t by delta, return the new value
+inline uint32_t
+atomic_inc32(_Atomic uint32_t *p, uint32_t delta) {
+    // fetch_add returns the *old* value; add delta to get the new
+    return atomic_fetch_add_explicit(p, delta, memory_order_relaxed) + delta;
+}
+
+// Increment an _Atomic uint64_t by delta, return the new value
+inline uint64_t
+atomic_inc64(_Atomic uint64_t *p, uint64_t delta) {
+    return atomic_fetch_add_explicit(p, delta, memory_order_relaxed) + delta;
+}
+
+// Increment an _Atomic int64_t by delta, return the new value
+inline int64_t
+atomic_inc64s(_Atomic int64_t *p, int64_t delta) {
+    return atomic_fetch_add_explicit(p, delta, memory_order_relaxed) + delta;
+}
+
+/* --------- 32-bit helpers --------- */
+
+/* Read an _Atomic uint32_t */
+inline uint32_t
+atomic_get32(const _Atomic uint32_t *p) {
+    return atomic_load_explicit(p, memory_order_relaxed);
+}
+
+/* Set an _Atomic uint32_t */
+inline void
+atomic_set32(_Atomic uint32_t *p, uint32_t v) {
+    atomic_store_explicit(p, v, memory_order_relaxed);
+}
+
+/* --------- 64-bit helpers --------- */
+
+/* Read an _Atomic uint64_t */
+inline uint64_t
+atomic_get64(const _Atomic uint64_t *p) {
+    return atomic_load_explicit(p, memory_order_relaxed);
+}
+
+/* Set an _Atomic uint64_t */
+inline void
+atomic_set64(_Atomic uint64_t *p, uint64_t v) {
+    atomic_store_explicit(p, v, memory_order_relaxed);
+}
+
+/* Read an _Atomic int64_t */
+inline int64_t
+atomic_get64s(const _Atomic int64_t *p) {
+    return atomic_load_explicit(p, memory_order_relaxed);
+}
+
+/* Set an _Atomic int64_t */
+inline void
+atomic_set64s(_Atomic int64_t *p, int64_t v) {
+    atomic_store_explicit(p, v, memory_order_relaxed);
+}
+

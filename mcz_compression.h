@@ -44,6 +44,8 @@
 #include <pthread.h>
 #include "mcz_config.h"
 #include "mcz_dict.h"
+#include "mcz_stats.h"
+
 
 /* ---------- portable atomic_uintptr_t --------------------------------- */
 #if defined(__STDC_NO_ATOMICS__)
@@ -133,15 +135,13 @@ int mcz_cfg_init(mcz_cfg_t *cfg);
 /* Feed raw samples for future dictionary training */
 void mcz_sample(const void *buf, size_t len);
 
-/* =======================  NEW STATS SECTION  ========================= */
-typedef struct {
-    _Atomic(uint64_t) train_ok; /* dictionaries successfully built     */
-    _Atomic(uint64_t) train_small; /* dict < 1 KiB                        */
-    _Atomic(uint64_t) train_err; /* ZDICT_trainFromBuffer() errors      */
-} mcz_stats_t;
-
-void mcz_get_stats(mcz_stats_t *out);
-
 int mcz_reload_dictionaries(void);
+
+const char *
+mcz_match_namespace(const char *key, size_t klen,
+                    const char **spaces, size_t nspaces);
+
+int mcz_get_stats_snapshot(mcz_stats_snapshot_t *snap, const char *ns, size_t ns_sz);
+
 
 #endif /* MCZ_COMPRESSION_H */

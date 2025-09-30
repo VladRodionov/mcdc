@@ -9,6 +9,7 @@
 #include "storage.h"
 #include <string.h>
 #include <stdlib.h>
+#include "mcz_cmd.h"
 
 /** binprot handlers **/
 static void process_bin_flush(conn *c, char *extbuf);
@@ -1075,6 +1076,11 @@ static void dispatch_bin_command(conn *c, char *extbuf) {
                 protocol_error = 1;
             }
             break;
+#ifdef USE_ZSTD
+        case PROTOCOL_BINARY_CMD_MCZ_STATS:
+            process_mcz_stats_bin(c);
+            break;
+#endif
         default:
             write_bin_error(c, PROTOCOL_BINARY_RESPONSE_UNKNOWN_COMMAND, NULL,
                             bodylen);

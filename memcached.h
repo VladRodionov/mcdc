@@ -4,7 +4,8 @@
  * The main memcached header holding commonly used data
  * structures and function prototypes.
  */
-
+#ifndef MEMCACHED_H
+#define MEMCACHED_H
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
@@ -1166,3 +1167,5 @@ extern void drop_worker_privileges();
 
 #define likely(x)       __builtin_expect((x),1)
 #define unlikely(x)     __builtin_expect((x),0)
+
+#endif

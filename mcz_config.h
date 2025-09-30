@@ -58,7 +58,7 @@ typedef struct {
     size_t   min_training_size;     // bytes of eligible data since last train
     double   ewma_alpha;            // 0..1
     double   retrain_drop;          // 0..1
-    mcz_train_mode_t train_mode;    // COVER (default) or FASTCOVER
+    mcz_train_mode_t train_mode;    // FAST (default) or OPTIMIZE
     
     // GC
     int32_t gc_run_interval;

@@ -54,7 +54,7 @@ typedef struct mcz_dict_meta_s {
 
 /* ---- One namespace/prefix -> list of dicts (newest first) ---- */
 typedef struct mcz_ns_entry_s {
-    char              *prefix;        /* e.g. "feed:" or "global" */
+    char              *prefix;        /* e.g. "feed:" or "default" */
     mcz_dict_meta_t  **dicts;         /* array[ndicts], dicts[0] is active */
     size_t             ndicts;
 } mcz_ns_entry_t;
@@ -104,4 +104,8 @@ mcz_table_t *table_clone_plus(const mcz_table_t *old,
 int mcz_mark_dict_retired(mcz_dict_meta_t *meta, time_t now, char **err_out);
 int mcz_next_available_id(const mcz_dict_meta_t *metas, size_t n,
                           int64_t quarantine_s, uint16_t *out_id, char **err_out);
+bool mcz_has_default_dict(const mcz_table_t *tab);
+const char **
+mcz_list_namespaces(const mcz_table_t *table, size_t *count);
+
 #endif

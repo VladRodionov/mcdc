@@ -93,7 +93,7 @@ int fsync_dirpath(const char *dirpath);
  * - sep: separator string (e.g., ", " or ",") — if NULL, defaults to ", "
  *
  * Returns a newly malloc()'d string the caller must free().
- * If prefixes is NULL or nprefixes==0, returns strdup("global").
+ * If prefixes is NULL or nprefixes==0, returns strdup("default").
  * On allocation failure, returns NULL.
  */
 char *mcz_join_namespaces(const char * const *prefixes, size_t nprefixes,
@@ -125,5 +125,48 @@ int uuidv4_string(char out[37]);
 int make_uuid_basename(const char *ext, char out[64], char **err_out);
 
 uint32_t fast_rand32(void);
+
+uint64_t fnv1a64(const char *s);
+
+void *xzmalloc(size_t n);
+
+/* --------- 32-bit helpers --------- */
+
+/* Read an _Atomic uint32_t */
+uint32_t
+atomic_get32(const _Atomic uint32_t *p);
+
+/* Set an _Atomic uint32_t */
+void
+atomic_set32(_Atomic uint32_t *p, uint32_t v);
+
+/* Increment an _Atomic uint32_t by delta, return the new value */
+uint32_t
+atomic_inc32(_Atomic uint32_t *p, uint32_t delta);
+/* --------- 64-bit helpers --------- */
+
+/* Read an _Atomic uint64_t */
+uint64_t
+atomic_get64(const _Atomic uint64_t *p);
+
+/* Set an _Atomic uint64_t */
+void
+atomic_set64(_Atomic uint64_t *p, uint64_t v);
+
+/* Increment an _Atomic uint64_t by delta, return the new value */
+uint64_t
+atomic_inc64(_Atomic uint64_t *p, uint64_t delta);
+
+/* Read an _Atomic int64_t */
+int64_t
+atomic_get64s(const _Atomic int64_t *p);
+
+/* Set an _Atomic int64_t */
+void
+atomic_set64s(_Atomic int64_t *p, int64_t v);
+
+/* Increment an _Atomic int64_t by delta, return the new value */
+int64_t
+atomic_inc64s(_Atomic int64_t *p, int64_t delta);
 
 #endif /* MCZ_UTILS_H */

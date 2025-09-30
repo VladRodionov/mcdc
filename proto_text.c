@@ -5,6 +5,11 @@
 
 #include "memcached.h"
 #include "proto_text.h"
+
+#ifdef USE_ZSTD
+#include "mcz_cmd.h"
+#endif
+
 // FIXME: only for process_proxy_stats()
 // - some better/different structure for stats subcommands
 // would remove this abstraction leak.
@@ -43,11 +48,6 @@
         p += 2; \
     } \
 }
-
-typedef struct token_s {
-    char *value;
-    size_t length;
-} token_t;
 
 static void _finalize_mset(conn *c, int nbytes, enum store_item_type ret, uint64_t cas) {
     mc_resp *resp = c->resp;
@@ -2924,7 +2924,12 @@ void process_command_ascii(conn *c, char *command) {
         out_string(c, "ERROR");
         return;
     }
-
+#ifdef USE_ZSTD
+    if (ntokens >= 2 && strcmp(tokens[COMMAND_TOKEN].value, "mcz") == 0) {
+        process_mcz_command_ascii(c, tokens, ntokens);
+        return;
+    }
+#endif
     // Meta commands are all 2-char in length.
     char first = tokens[COMMAND_TOKEN].value[0];
     if (first == 'm' && tokens[COMMAND_TOKEN].length == 2) {

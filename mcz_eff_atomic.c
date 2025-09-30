@@ -42,6 +42,8 @@
  *     tracking subsystem.
  */
 #include "mcz_eff_atomic.h"
+#include "mcz_stats.h"
+#include "mcz_utils.h"
 
 /* ------- helpers ------- */
 static inline double clamp01(double x){ return x < 0.0 ? 0.0 : (x > 1.0 ? 1.0 : x); }
@@ -153,7 +155,16 @@ bool mcz_eff_should_retrain(uint64_t now_s)
 
     /* --- Steady state: require relative degradation --- */
     double rel = (ewma / base) - 1.0; /* >0 => worse compression ; < 0 - better compression, but still can be a different workload */
-    return rel >= th || rel <= -th;
+    bool trigger_up = rel <= -th;
+    bool trigger_down = rel >= th;
+    /* get statistics for "default" namespace*/
+    mcz_stats_atomic_t * stats = mcz_stats_lookup_by_ns("default", 7);
+    if (trigger_up){
+        if (stats) atomic_inc32(&stats->triggers_rise, 1);
+    } else if (trigger_down){
+        if (stats) atomic_inc32(&stats->triggers_drop, 1);
+    }
+    return trigger_up || trigger_down;
 }
 
 /* Trainer thread only: keep baseline non-increasing.
@@ -177,4 +188,23 @@ void mcz_eff_mark_retrained(uint64_t now_s)
     atomic_store_explicit(&g_eff.last_train_ts_s,   now_s, memory_order_release);
 }
 
+/* 1. Return current EWMA as double */
+double mcz_eff_get_ewma(void)
+{
+    uint64_t bits = atomic_load_explicit(&g_eff.ewma_bits, memory_order_acquire);
+    return u642dbl(bits);
+}
 
+/* 2. Return baseline as double */
+double mcz_eff_get_baseline(void)
+{
+    uint64_t bits = atomic_load_explicit(&g_eff.baseline_bits, memory_order_acquire);
+    return u642dbl(bits);
+}
+
+/* 3. Return seconds since last training */
+uint64_t mcz_eff_last_train_seconds(void)
+{
+    uint64_t last = atomic_load_explicit(&g_eff.last_train_ts_s, memory_order_acquire);
+    return last;
+}

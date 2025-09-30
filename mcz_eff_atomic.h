@@ -82,5 +82,11 @@ bool mcz_eff_should_retrain(uint64_t now_s);
 
 void mcz_eff_mark_retrained(uint64_t now_s);
 
+double mcz_eff_get_ewma(void);
+
+double mcz_eff_get_baseline(void);
+
+uint64_t mcz_eff_last_train_seconds(void);
+
 
 #endif /* MCZ_EFF_ATOMIC_H */

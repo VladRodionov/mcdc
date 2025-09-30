@@ -34,7 +34,7 @@
  *   - Copy-on-write: new table built from old + new dict, then atomically
  *     published.
  *   - Old tables retired to GC for safe reclamation.
- *   - Default namespace is "global" if none provided.
+ *   - Default namespace is "default" if none provided.
  *
  * Naming convention:
  *   - All functions/types prefixed with `mcz_dict_*` belong to this subsystem.
@@ -80,6 +80,7 @@
 #include "mcz_dict.h"
 #include "mcz_utils.h"
 #include "mcz_dict_pool.h"
+#include "mcz_stats.h"
 #include "memcached.h"   /* for settings, mc logging if you have it */
 
 
@@ -143,7 +144,7 @@ static int parse_manifest_file(const char *mf_path, const char *dir, mcz_dict_me
     if (!m->prefixes || m->nprefixes==0) {
         m->prefixes = calloc(1,sizeof(char*));
         if (!m->prefixes) return -ENOMEM;
-        m->prefixes[0] = xstrdup("global");
+        m->prefixes[0] = xstrdup("default");
         m->nprefixes = 1;
     }
     
@@ -264,15 +265,15 @@ static int mcz_save_dict_file(const char *dir,
 
 /* -------------------------
  * Part 2: write <dir>/<uuid>.mf
- *   - prefixes may be NULL/0 => "global"
+ *   - prefixes may be NULL/0 => "default"
  *   - signature optional (may be NULL/empty)
  *   - created: pass 0 to use current time
  * ------------------------- */
 
 
-/* Build "a, b, c" or "global" if none. Caller must free(). */
+/* Build "a, b, c" or "default" if none. Caller must free(). */
 static char *build_ns_line(const char * const *prefixes, size_t nprefixes) {
-    if (!prefixes || nprefixes == 0) return strdup("global");
+    if (!prefixes || nprefixes == 0) return strdup("default");
     size_t total = 1;
     for (size_t i = 0; i < nprefixes; ++i) total += strlen(prefixes[i]) + 2;
     char *s = (char*)malloc(total);
@@ -489,6 +490,38 @@ static int assign_ids_from_fs(mcz_dict_meta_t *metas, size_t n,
     return 0;
 }
 
+/*
+ * Returns array of C strings with known namespace prefixes (except "default").
+ * Count is returned in *count.
+ *
+ * IMPORTANT: returned array points into the existing ns_entry objects;
+ *            caller must NOT free the strings, only the array if needed.
+ */
+const char **
+mcz_list_namespaces(const mcz_table_t *table, size_t *count)
+{
+    if (!table || table->nspaces == 0) {
+        if (count) *count = 0;
+        return NULL;
+    }
+    /* Build temporary view into existing prefixes */
+    const char **list = malloc(table->nspaces * sizeof(char *));
+    if (!list) {
+        if (count) *count = 0;
+        return NULL;
+    }
+    char * def_name = "default";
+    for (size_t i = 0; i < table->nspaces; i++) {
+        mcz_ns_entry_t *ns = table->spaces[i];
+        if (!strcmp(ns->prefix, def_name)){
+            continue;
+        }
+        list[i] = ns ? ns->prefix : "";
+    }
+    if (count) *count = table->nspaces;
+
+    return list;
+}
 
 /* ----------------- PUBLIC API ----------------- */
 
@@ -565,7 +598,7 @@ mcz_table_t *mcz_scan_dict_dir(const char *dir,
         mcz_dict_meta_t *m = &metas[i];
         size_t npre = (m->nprefixes && m->prefixes) ? m->nprefixes : 1;
         for (size_t j=0;j<npre;j++) {
-            const char *pref = (m->prefixes && m->prefixes[j]) ? m->prefixes[j] : "global";
+            const char *pref = (m->prefixes && m->prefixes[j]) ? m->prefixes[j] : "default";
             mcz_ns_entry_t *sp = find_or_add_space(&spaces, &nspaces, &cspaces, pref);
             if (!sp) continue;
             size_t nd = sp->ndicts;
@@ -665,6 +698,9 @@ mcz_table_t *mcz_scan_dict_dir(const char *dir,
     tab->metas    = metas;
     tab->nmeta    = nmeta;
     tab->built_at = now;
+    size_t ns_sz = 0;
+    const char ** ns_list = mcz_list_namespaces(tab, &ns_sz);
+    mcz_stats_rebuild_from_list(ns_list, ns_sz, 0);
     return tab;
 }
 
@@ -707,20 +743,32 @@ int mcz_next_available_id(const mcz_dict_meta_t *metas, size_t n,
     return -ENOSPC;
 }
 
-/* Pick the active dict for a key (Phase-1: longest prefix match; falls back to "global") */
+/* Pick the active dict for a key (Phase-1: longest prefix match; falls back to "default") */
 const mcz_dict_meta_t *mcz_pick_dict(const mcz_table_t *tab, const char *key, size_t klen){
     if (!tab || !key) return NULL;
     const mcz_dict_meta_t *fallback = NULL;
     for (size_t i=0;i<tab->nspaces;i++) {
         mcz_ns_entry_t *sp = tab->spaces[i];
         if (!sp->ndicts) continue;
-        if (!strcmp(sp->prefix,"global")) { fallback = sp->dicts[0]; continue; }
+        if (!strcmp(sp->prefix,"default")) { fallback = sp->dicts[0]; continue; }
         size_t plen = strlen(sp->prefix);
         if (plen <= klen && !strncmp(key, sp->prefix, plen)) {
             return sp->dicts[0];
         }
     }
     return fallback;
+}
+
+bool mcz_has_default_dict(const mcz_table_t *tab){
+    if (!tab) return NULL;
+    for (size_t i=0;i<tab->nspaces;i++) {
+        mcz_ns_entry_t *sp = tab->spaces[i];
+        if (!sp->ndicts) continue;
+        if (!strcmp(sp->prefix,"default")) {
+            return true;
+        }
+    }
+    return false;
 }
 
 const mcz_dict_meta_t *mcz_lookup_by_id(const mcz_table_t *tab, uint16_t id) {
@@ -794,7 +842,7 @@ int mcz_save_dictionary_and_manifest(const char *dir,
         if (!prefixes || nprefixes == 0) {
             out_meta->prefixes = (char**)calloc(1, sizeof(char*));
             if (!out_meta->prefixes) { set_err(err_out, "mcz_save_dictionary_and_manifest: OOM prefixes"); rc = -ENOMEM; goto fail_free_temp; }
-            out_meta->prefixes[0] = strdup("global");
+            out_meta->prefixes[0] = strdup("default");
             if (!out_meta->prefixes[0]) { set_err(err_out, "mcz_save_dictionary_and_manifest: OOM prefix dup"); rc = -ENOMEM; goto fail_free_temp; }
             out_meta->nprefixes = 1;
         } else {
@@ -863,7 +911,7 @@ static void meta_deep_copy(mcz_dict_meta_t *dst, const mcz_dict_meta_t *src,
     } else {
         dst->prefixes = (char**)calloc(1, sizeof(char*));
         if (dst->prefixes) {
-            dst->prefixes[0] = strdup("global");
+            dst->prefixes[0] = strdup("default");
             dst->nprefixes = 1;
         }
     }
@@ -899,7 +947,7 @@ static mcz_ns_entry_t *add_space(mcz_table_t *tab, const char *pref) {
 
     mcz_ns_entry_t *sp = (mcz_ns_entry_t*)calloc(1, sizeof(*sp));
     if (!sp) return NULL;
-    sp->prefix = strdup(pref ? pref : "global");
+    sp->prefix = strdup(pref ? pref : "default");
     sp->dicts  = NULL;
     sp->ndicts = 0;
 
@@ -941,7 +989,7 @@ mcz_table_t *table_clone_plus(const mcz_table_t *old,
     for (size_t i = 0; i < tab->nmeta; ++i) {
         mcz_dict_meta_t *m = &tab->metas[i];
         for (size_t j = 0; j < m->nprefixes; ++j) {
-            const char *pref = m->prefixes[j] ? m->prefixes[j] : "global";
+            const char *pref = m->prefixes[j] ? m->prefixes[j] : "default";
             mcz_ns_entry_t *sp = find_space(tab->spaces, tab->nspaces, pref);
             if (!sp) {
                 sp = add_space(tab, pref);
