@@ -105,7 +105,6 @@ int mcz_mark_dict_retired(mcz_dict_meta_t *meta, time_t now, char **err_out);
 int mcz_next_available_id(const mcz_dict_meta_t *metas, size_t n,
                           int64_t quarantine_s, uint16_t *out_id, char **err_out);
 bool mcz_has_default_dict(const mcz_table_t *tab);
-const char **
-mcz_list_namespaces(const mcz_table_t *table, size_t *count);
+
 
 #endif

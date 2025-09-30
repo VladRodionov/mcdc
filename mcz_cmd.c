@@ -170,14 +170,82 @@ static int dump_json_into_buf(char **outp, size_t *lenp,
     *lenp = (size_t)n;
     return 0;
 }
+/* Build ASCII multiline payload:
+   NS global\r\n
+   NS <ns>\r\n ...
+   NS default\r\n (if not already present)
+   END\r\n
+*/
+static int build_ns_ascii(char **outp, size_t *lenp) {
+    size_t n = 0, i;
+    const char **list = mcz_list_namespaces(&n);   /* may return NULL or contain NULLs */
+
+    /* First pass: compute size */
+    size_t total = 0;
+    total += sizeof("NS global\r\n") - 1;  /* always include global */
+    int has_default = 0;
+    for (i = 0; i < n; i++) {
+        const char *ns = list ? list[i] : NULL;
+        if (!ns) continue;
+        if (strcmp(ns, "default") == 0) has_default = 1;
+        total += sizeof("NS ") - 1 + strlen(ns) + sizeof("\r\n") - 1;
+    }
+    if (!has_default) total += sizeof("NS default\r\n") - 1;
+    total += sizeof("END\r\n") - 1;
+
+    char *buf = (char *)malloc(total + 1);
+    if (!buf) return -1;
+
+    /* Second pass: fill */
+    size_t off = 0;
+    off += (size_t)sprintf(buf + off, "NS global\r\n");
+    for (i = 0; i < n; i++) {
+        const char *ns = list ? list[i] : NULL;
+        if (!ns) continue;
+        off += (size_t)sprintf(buf + off, "NS %s\r\n", ns);
+    }
+    if (!has_default) off += (size_t)sprintf(buf + off, "NS default\r\n");
+    off += (size_t)sprintf(buf + off, "END\r\n");
+    buf[off] = '\0';
+
+    /* If mcz_list_namespaces() returns heap, free it; otherwise remove this free. */
+    if (list) free((void*)list);
+
+    *outp = buf; *lenp = off;
+    return 0;
+}
 
 void process_mcz_command_ascii(conn *c, token_t *tokens, const size_t ntokens)
 {
-    /* Syntax: mcz stats [namespace|global|default] [json] */
+    
+    /* ASCII: mcz <subcmd> ... */
     if (ntokens < 2 || strcmp(tokens[COMMAND_TOKEN].value, "mcz") != 0) {
         out_string(c, "CLIENT_ERROR bad command");
         return;
     }
+
+    const char *sub = (ntokens > 2) ? tokens[COMMAND_TOKEN + 1].value : NULL;
+    if (!sub) {
+        out_string(c, "CLIENT_ERROR usage: mcz <stats|ns> ...");
+        return;
+    }
+
+    /* mcz ns */
+    if (strcmp(sub, "ns") == 0) {
+        if (ntokens > 3){
+            out_string(c, "CLIENT_ERROR bad command");
+            return;
+        }
+        char *payload = NULL; size_t plen = 0;
+        if (build_ns_ascii(&payload, &plen) != 0) {
+            out_string(c, "SERVER_ERROR out of memory");
+            return;
+        }
+        write_buf(c, payload, plen);
+        free(payload);
+        return;
+    }
+    /* mcz stats */
     if (ntokens < 3 || strcmp(tokens[COMMAND_TOKEN + 1].value, "stats") != 0) {
         out_string(c, "CLIENT_ERROR usage: mcz stats [namespace|global|default] [json]");
         return;
@@ -288,6 +356,91 @@ void process_mcz_stats_bin(conn *c)
     h.response.datatype = PROTOCOL_BINARY_RAW_BYTES;
     h.response.status   = htons(PROTOCOL_BINARY_RESPONSE_SUCCESS);
     h.response.bodylen  = htonl((uint32_t)plen);
+    h.response.opaque   = req->request.opaque;
+    h.response.cas      = 0;
+
+    memcpy(resp, &h, sizeof(h));
+    if (plen) memcpy(resp + sizeof(h), payload, plen);
+    free(payload);
+
+    write_and_free(c, resp, (int)total);
+}
+
+/* mcz_cmd.c continued */
+
+static int build_ns_text_value(char **outp, size_t *lenp) {
+    size_t n = 0, i;
+    const char **list = mcz_list_namespaces(&n);
+
+    /* First pass: compute size of newline-separated blob */
+    size_t total = 0;
+    total += sizeof("global\n") - 1;
+    int has_default = 0;
+    for (i = 0; i < n; i++) {
+        const char *ns = list ? list[i] : NULL;
+        if (!ns) continue;
+        if (strcmp(ns, "default") == 0) has_default = 1;
+        total += strlen(ns) + 1; /* '\n' */
+    }
+    if (!has_default) total += sizeof("default\n") - 1;
+
+    char *buf = (char *)malloc(total + 1);
+    if (!buf) return -1;
+
+    size_t off = 0;
+    memcpy(buf + off, "global\n", 7); off += 7;
+    for (i = 0; i < n; i++) {
+        const char *ns = list ? list[i] : NULL;
+        if (!ns) continue;
+        size_t L = strlen(ns);
+        memcpy(buf + off, ns, L); off += L;
+        buf[off++] = '\n';
+    }
+    if (!has_default) {
+        memcpy(buf + off, "default\n", 8); off += 8;
+    }
+    buf[off] = '\0';
+
+    if (list) free((void*)list);
+
+    *outp = buf; *lenp = off;
+    return 0;
+}
+
+void process_mcz_ns_bin(conn *c)
+{
+    const protocol_binary_request_header *req = &c->binary_header;
+
+    /* In 1.6.38, these are already host-order */
+    uint8_t  extlen  = req->request.extlen;
+    uint16_t keylen  = req->request.keylen;
+    uint32_t bodylen = req->request.bodylen;
+
+    /* Expect no extras/key/value for this op */
+    if (extlen != 0 || keylen != 0 || bodylen != 0) {
+        write_bin_error(c, PROTOCOL_BINARY_RESPONSE_EINVAL, NULL, 0);
+        return;
+    }
+
+    char *payload = NULL; size_t plen = 0;
+    if (build_ns_text_value(&payload, &plen) != 0) {
+        write_bin_error(c, PROTOCOL_BINARY_RESPONSE_ENOMEM, NULL, 0);
+        return;
+    }
+
+    size_t total = sizeof(protocol_binary_response_header) + plen;
+    char *resp = (char *)malloc(total);
+    if (!resp) { free(payload); write_bin_error(c, PROTOCOL_BINARY_RESPONSE_ENOMEM, NULL, 0); return; }
+
+    protocol_binary_response_header h;
+    memset(&h, 0, sizeof(h));
+    h.response.magic    = PROTOCOL_BINARY_RES;
+    h.response.opcode   = PROTOCOL_BINARY_CMD_MCZ_NS;
+    h.response.keylen   = 0;
+    h.response.extlen   = 0;
+    h.response.datatype = PROTOCOL_BINARY_RAW_BYTES;
+    h.response.status   = PROTOCOL_BINARY_RESPONSE_SUCCESS;
+    h.response.bodylen  = (uint32_t)plen;       /* host-order; core will swap on write */
     h.response.opaque   = req->request.opaque;
     h.response.cas      = 0;
 

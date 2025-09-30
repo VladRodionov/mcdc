@@ -497,8 +497,8 @@ static int assign_ids_from_fs(mcz_dict_meta_t *metas, size_t n,
  * IMPORTANT: returned array points into the existing ns_entry objects;
  *            caller must NOT free the strings, only the array if needed.
  */
-const char **
-mcz_list_namespaces(const mcz_table_t *table, size_t *count)
+static const char **
+list_namespaces(const mcz_table_t *table, size_t *count)
 {
     if (!table || table->nspaces == 0) {
         if (count) *count = 0;
@@ -699,7 +699,7 @@ mcz_table_t *mcz_scan_dict_dir(const char *dir,
     tab->nmeta    = nmeta;
     tab->built_at = now;
     size_t ns_sz = 0;
-    const char ** ns_list = mcz_list_namespaces(tab, &ns_sz);
+    const char ** ns_list = list_namespaces(tab, &ns_sz);
     mcz_stats_rebuild_from_list(ns_list, ns_sz, 0);
     return tab;
 }

@@ -143,5 +143,7 @@ mcz_match_namespace(const char *key, size_t klen,
 
 int mcz_get_stats_snapshot(mcz_stats_snapshot_t *snap, const char *ns, size_t ns_sz);
 
+const char ** mcz_list_namespaces(size_t *count);
+
 
 #endif /* MCZ_COMPRESSION_H */

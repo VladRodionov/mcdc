@@ -1000,3 +1000,33 @@ mcz_get_stats_snapshot(mcz_stats_snapshot_t *snap, const char *ns, size_t ns_sz)
     }
 }
 
+const char ** mcz_list_namespaces(size_t *count){
+    mcz_ctx_t *ctx = mcz_ctx_mut();
+    if (!ctx) return NULL;
+
+    mcz_table_t *table = (mcz_table_t*)atomic_load_explicit(&ctx->dict_table, memory_order_acquire);
+    if (!table || table->nspaces == 0) {
+        if (count) *count = 0;
+        return NULL;
+    }
+    /* Build temporary view into existing prefixes */
+    const char **list = malloc(table->nspaces * sizeof(char *));
+    if (!list) {
+        if (count) *count = 0;
+        return NULL;
+    }
+    char * def_name = "default";
+    for (size_t i = 0; i < table->nspaces; i++) {
+        mcz_ns_entry_t *ns = table->spaces[i];
+        if (!strcmp(ns->prefix, def_name)){
+            continue;
+        }
+        list[i] = ns ? ns->prefix : "";
+    }
+    if (count) *count = table->nspaces;
+
+    return list;
+    
+}
+
+

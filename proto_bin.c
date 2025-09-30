@@ -1080,6 +1080,9 @@ static void dispatch_bin_command(conn *c, char *extbuf) {
         case PROTOCOL_BINARY_CMD_MCZ_STATS:
             process_mcz_stats_bin(c);
             break;
+        case PROTOCOL_BINARY_CMD_MCZ_NS:
+            process_mcz_ns_bin(c);
+            break;
 #endif
         default:
             write_bin_error(c, PROTOCOL_BINARY_RESPONSE_UNKNOWN_COMMAND, NULL,
