@@ -63,7 +63,6 @@ mcz_ctx_t g_mcz = { 0 };      /* zero-init by the loader */
 /* ---------- zstd context helpers ------------------------------------ */
 const mcz_ctx_t *mcz_ctx(void)      { return &g_mcz; }
 mcz_ctx_t       *mcz_ctx_mut(void)  { return &g_mcz; }
-mcz_cfg_t *mcz_config_get(void) { return &g_mcz.cfg; }
 
 
 static const mcz_table_t *mcz_current_table(void) {
@@ -92,14 +91,14 @@ static inline bool extstore_enabled_global(void) {
 }
 #endif
 
-int
-mcz_cfg_init(mcz_cfg_t *cfg)
+static int mcz_cfg_init(void)
 {
-    if (!cfg) return -EINVAL;
-    memset(cfg, 0, sizeof(*cfg));
-
+    mcz_cfg_t *cfg =  mcz_config_get();
+    mcz_ctx_t *ctx = mcz_ctx_mut();
+    ctx->cfg = cfg;
+    
     /* 1. Compression level ---------------------------------------- */
-    int lvl = settings.zstd_level;          /* e.g. from -Zl <n> CL arg */
+    int lvl = cfg->zstd_level;          /* e.g. from -Zl <n> CL arg */
     if (lvl == 0)                           /* 0 = default (3) */
         lvl = 3;
     if (lvl < ZSTD_LVL_MIN || lvl > ZSTD_LVL_MAX) {
@@ -113,21 +112,11 @@ mcz_cfg_init(mcz_cfg_t *cfg)
     cfg->zstd_level = lvl;
 
     /* 2. Dictionary size ------------------------------------------ */
-    size_t dict_sz = settings.mcz_dict_size;  /* bytes from -Zd <bytes> */
+    size_t dict_sz = cfg->dict_size;  /* bytes from -Zd <bytes> */
     if (dict_sz == 0) dict_sz = KB(112);      /* good default */
     if (dict_sz > ZSTD_DICT_MAX) dict_sz = ZSTD_DICT_MAX;
     cfg->dict_size = dict_sz;
-
-    /* 3. Training corpus threshold ( ≥ dict×100 unless overridden ) */
-    size_t mts = settings.mcz_min_training_size;     /* from -Zt <bytes> */
-    if (mts == 0) mts = dict_sz * 100;
-    cfg->min_training_size = mts;
-
-    /* 4. Value size bounds for compression ------------------------ */
-    cfg->min_comp_size = settings.mcz_min_size ? settings.mcz_min_size : ZSTD_VALUE_MIN;
-    cfg->max_comp_size = settings.mcz_max_size
-                         ? settings.mcz_max_size
-                         : ZSTD_VALUE_MAX;
+    
     if (cfg->max_comp_size >= settings.slab_chunk_size_max){
         cfg->max_comp_size = settings.slab_chunk_size_max - 1;
         if (cfg->max_comp_size > ZSTD_VALUE_MAX){
@@ -157,45 +146,6 @@ mcz_cfg_init(mcz_cfg_t *cfg)
         return -EINVAL;
     }
 #endif
-
-
-    /* 5. Dictionary directory ------------------------------------- */
-    if (settings.mcz_dict_dir && settings.mcz_dict_dir[0]) {
-        cfg->dict_dir = strdup(settings.mcz_dict_dir);
-        if (!cfg->dict_dir) return -ENOMEM;
-    } else {
-        cfg->dict_dir = NULL;   /* live training */
-    }
-    cfg->enable_dict = settings.mcz_enable_dict;
-    cfg->enable_comp = settings.mcz_enable_comp;
-    
-    /* 6. Training */
-    cfg->enable_training = settings.mcz_enable_training;
-    cfg->retraining_interval_s = settings.mcz_retraining_interval_s;
-    cfg->min_training_size = settings.mcz_min_training_size;
-    cfg->ewma_alpha = settings.mcz_ewma_alpha;
-    cfg->retrain_drop = settings.mcz_retrain_drop;
-    cfg->train_mode = settings.mcz_train_mode;
-    
-    /* 7. Garbage collection */
-    cfg->gc_run_interval = settings.mcz_gc_run_interval;
-    cfg->gc_cool_period = settings.mcz_gc_cool_period;
-    cfg->gc_quarantine_period = settings.mcz_gc_quarantine_period;
-
-    /* 8. Retention */
-    cfg->dict_retain_hours = settings.mcz_dict_retain_hours;
-    cfg->dict_retain_max = settings.mcz_dict_retain_max;
-    
-    /* 9. Sampling + Spool */
-    cfg->enable_sampling = settings.mcz_enable_sampling;
-    cfg->sample_p = settings.mcz_sample_p;
-    cfg->sample_window_sec= settings.mcz_sample_window_sec;
-    cfg->sample_roll_bytes = settings.mcz_sample_roll_bytes;
-    cfg->spool_dir = settings.mcz_spool_dir;
-    cfg->spool_max_bytes = settings.mcz_spool_max_bytes;
-    /* Not used */
-    cfg->compress_keys = settings.mcz_compress_keys;
-
     return 0;
 }
 
@@ -217,14 +167,14 @@ static void tls_ensure(size_t need) {
  * ------------------------------------------------------------------- */
 static int mcz_load_dicts(void) {
     mcz_ctx_t *ctx = mcz_ctx_mut();
-    if (!ctx->cfg.dict_dir)
+    if (!ctx->cfg->dict_dir)
         return 1; /* nothing to load, continue live training */
-    if (!ctx->cfg.enable_dict){
+    if (!ctx->cfg->enable_dict){
         return 1;
     }
     char *err = NULL;
-    mcz_table_t *tab = mcz_scan_dict_dir(ctx->cfg.dict_dir, ctx->cfg.dict_retain_max,
-                                         ctx->cfg.gc_quarantine_period, ctx->cfg.zstd_level, &err);
+    mcz_table_t *tab = mcz_scan_dict_dir(ctx->cfg->dict_dir, ctx->cfg->dict_retain_max,
+                                         ctx->cfg->gc_quarantine_period, ctx->cfg->zstd_level, &err);
     if (err != NULL){
         fprintf(stderr, "load dictionaries failed: %s\n", err ? err : "unknown error");
         free(err);
@@ -266,7 +216,7 @@ static size_t train_fastcover(void* dictBuf, size_t dictCap,
 static size_t train_fastcover_optimize(void* dictBuf, size_t dictCap,
                                 const void* samplesBuf, const size_t* sampleSizes, unsigned nbSamples)
 {
-    int targetLevel = mcz_ctx()->cfg.zstd_level;
+    int targetLevel = mcz_ctx()->cfg->zstd_level;
     ZDICT_fastCover_params_t p;                /* advanced; requires ZDICT_STATIC_LINKING_ONLY */
     memset(&p, 0, sizeof(p));                  /* 0 => defaults; also enables search for k/d/steps */
     /* Leave at 0 to ENABLE search (fastCover’s optimizer will vary these) */
@@ -299,7 +249,7 @@ static size_t train_dictionary(void* dictBuf, size_t dictCap,
                                 const void* samplesBuf, const size_t* sampleSizes, unsigned nbSamples)
 {
     const mcz_ctx_t *ctx = mcz_ctx();
-    mcz_train_mode_t mode = ctx->cfg.train_mode;
+    mcz_train_mode_t mode = ctx->cfg->train_mode;
     if (mode == MCZ_TRAIN_FAST) {
         return train_fastcover(dictBuf, dictCap,
                                     samplesBuf, sampleSizes, nbSamples);
@@ -313,9 +263,9 @@ static size_t train_dictionary(void* dictBuf, size_t dictCap,
 /* ---------- trainer thread ------------------------------------------ */
 static void* trainer_main(void *arg) {
     mcz_ctx_t *ctx = arg;
-    const size_t max_dict = ctx->cfg.dict_size ? ctx->cfg.dict_size : 110 * 1024;
+    const size_t max_dict = ctx->cfg->dict_size ? ctx->cfg->dict_size : 110 * 1024;
     const size_t train_threshold =
-        ctx->cfg.min_training_size ? ctx->cfg.min_training_size : max_dict * 100; /* 100× rule */
+        ctx->cfg->min_training_size ? ctx->cfg->min_training_size : max_dict * 100; /* 100× rule */
 
     for (;;) {
         usleep(1000000); // 1000 ms
@@ -438,10 +388,10 @@ static void* trainer_main(void *arg) {
             char *err = NULL;
             time_t created = time(NULL);  /* single timestamp */
             int rc = mcz_save_dictionary_and_manifest(
-                         ctx->cfg.dict_dir,
+                         ctx->cfg->dict_dir,
                          dict, dict_sz,
                          NULL, 0,
-                         ctx->cfg.zstd_level,
+                         ctx->cfg->zstd_level,
                          NULL,
                          created,
                          0,
@@ -485,10 +435,10 @@ static void* trainer_main(void *arg) {
 static int mcz_start_trainer(mcz_ctx_t *ctx){
     if (!ctx)
         return -ENOMEM;
-    if (!ctx->cfg.enable_comp){
+    if (!ctx->cfg->enable_comp){
         return 0;
     }
-    if (ctx->cfg.enable_training && ctx->cfg.enable_dict){
+    if (ctx->cfg->enable_training && ctx->cfg->enable_dict){
         pthread_attr_t attr;
         pthread_attr_init(&attr);
         pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
@@ -496,28 +446,23 @@ static int mcz_start_trainer(mcz_ctx_t *ctx){
         pthread_attr_destroy(&attr);
         if (settings.verbose > 1) {
             log_rate_limited(1000000ULL,
-                             "mcz-dict: trainer thread started (max_dict=%zu B)\n", ctx->cfg.dict_size);
+                             "mcz-dict: trainer thread started (max_dict=%zu B)\n", ctx->cfg->dict_size);
         }
     }
     return 0;
 }
 
 /* ---------- public init / destroy ----------------------------------- */
-int mcz_init(mcz_cfg_t *cfg) {
+int mcz_init(void) {
+    mcz_cfg_init();
     mcz_ctx_t *ctx = mcz_ctx_mut();
     if (!ctx)
         return -ENOMEM;
-    if (!ctx->cfg.enable_comp){
+    if (!ctx->cfg->enable_comp){
         return 0;
     }
-    /* 1. configuration */
-    ctx->cfg = cfg ? *cfg : (mcz_cfg_t ) { .zstd_level = 3, .dict_size = 110 * 1024,
-                             .min_training_size = 110 * 1024 * 100,
-                             .min_comp_size = 32,
-                             .max_comp_size = 64 * 1024,
-                             .compress_keys = false,
-                             .dict_dir = NULL };
-    /* 2. atomic pointers / counters */
+    mcz_cfg_t *cfg = ctx->cfg;
+    /* 1. atomic pointers / counters */
     atomic_init(&ctx->samples_head, NULL); /* empty list            */
     atomic_init(&ctx->bytes_pending, 0);
     ctx->trainer_tid = (pthread_t ) { 0 }; /* will be set by trainer thread */
@@ -532,10 +477,10 @@ int mcz_init(mcz_cfg_t *cfg) {
 
     mcz_train_cfg_t ecfg = {
         .enable_training = true,
-        .retraining_interval_s = ctx->cfg.retraining_interval_s,
-        .min_training_size = ctx->cfg.min_training_size,
-        .ewma_alpha = ctx->cfg.ewma_alpha,
-        .retrain_drop = ctx->cfg.retrain_drop
+        .retraining_interval_s = ctx->cfg->retraining_interval_s,
+        .min_training_size = ctx->cfg->min_training_size,
+        .ewma_alpha = ctx->cfg->ewma_alpha,
+        .retrain_drop = ctx->cfg->retrain_drop
     };
 
     mcz_eff_configure(&ecfg);                 /* single-threaded init */
@@ -549,7 +494,7 @@ int mcz_init(mcz_cfg_t *cfg) {
     mcz_gc_start(ctx);
     if (settings.verbose > 1) {
         log_rate_limited(0ULL,
-                         "mcz-dict: GC thread started (gc_run_interval=%zu sec)\n", ctx->cfg.gc_run_interval);
+                         "mcz: GC thread started\n");
     }
     /* ---------------  initialize sampler subsystem --------------------------*/
     mcz_sampler_init(cfg->spool_dir, cfg->sample_p, cfg->spool_max_bytes);
@@ -587,13 +532,13 @@ void mcz_destroy(void) {
 static void sample_for_training(const void *src, size_t len) {
     mcz_ctx_t *ctx = mcz_ctx_mut();
     /* skip very large and very small items */
-    if (len >ctx->cfg.max_comp_size || len < ctx->cfg.min_comp_size)
+    if (len >ctx->cfg->max_comp_size || len < ctx->cfg->min_comp_size)
         return;
     if (!is_training_active()) /* skip if training is not active */
         return;
     const mcz_table_t* tab = (const mcz_table_t*) atomic_load_explicit(&ctx->dict_table, memory_order_acquire);
     bool empty_state = !mcz_has_default_dict(tab);
-    double p = empty_state? 1.0: ctx->cfg.sample_p;
+    double p = empty_state? 1.0: ctx->cfg->sample_p;
     
     // Suppose p is in [0,1]. Represent it as fixed-point threshold:
     uint32_t threshold = (uint32_t)((double)UINT32_MAX * p);
@@ -608,8 +553,8 @@ static void sample_for_training(const void *src, size_t len) {
     
     /* ---- back-pressure: stop once corpus ≥ min_train_bytes ---------- */
     size_t limit =
-            ctx->cfg.min_training_size ?
-                    ctx->cfg.min_training_size : ctx->cfg.dict_size * 100; /* 100× rule */
+            ctx->cfg->min_training_size ?
+                    ctx->cfg->min_training_size : ctx->cfg->dict_size * 100; /* 100× rule */
 
     if (atomic_load_explicit(&ctx->bytes_pending, memory_order_relaxed)
             >= limit)
@@ -722,7 +667,7 @@ ssize_t mcz_maybe_compress(const void *src, size_t src_sz, const void *key, size
                     void **dst, uint16_t *dict_id_out)
 {
     mcz_ctx_t *ctx = mcz_ctx_mut();          /* global-static instance */
-    if (!ctx->cfg.enable_comp){
+    if (!ctx->cfg->enable_comp){
         return 0;
     }
     /* 0.  sanity checks ------------------------------------------ */
@@ -731,12 +676,13 @@ ssize_t mcz_maybe_compress(const void *src, size_t src_sz, const void *key, size
     /* Statistics */
     mcz_stats_atomic_t * stats = mcz_stats_lookup_by_key((const char *) key, key_sz);
     atomic_inc64(&stats->writes_total, 1);
+    atomic_inc64(&stats->bytes_raw_total, src_sz);
 
-    if (ctx->cfg.min_comp_size && src_sz < ctx->cfg.min_comp_size){
+    if (ctx->cfg->min_comp_size && src_sz < ctx->cfg->min_comp_size){
         atomic_inc64(&stats->skipped_comp_min_size, 1);
         return 0;
     }
-    if (ctx->cfg.max_comp_size && src_sz > ctx->cfg.max_comp_size) {
+    if (ctx->cfg->max_comp_size && src_sz > ctx->cfg->max_comp_size) {
         atomic_inc64(&stats->skipped_comp_max_size, 1);
         return 0;                              /* bypass */
     }
@@ -756,12 +702,12 @@ ssize_t mcz_maybe_compress(const void *src, size_t src_sz, const void *key, size
         ? ZSTD_compress_usingCDict(tls.cctx, dst_buf, bound,
                                    src, src_sz, cd)
         : ZSTD_compressCCtx      (tls.cctx, dst_buf, bound,
-                                   src, src_sz, ctx->cfg.zstd_level);
+                                   src, src_sz, ctx->cfg->zstd_level);
     if (ZSTD_isError(csz)) {
         atomic_inc64(&stats->compress_errs, 1);
         return -(ssize_t)ZSTD_getErrorCode(csz);
     }
-    /* 4. report 'eff' statistics */
+    /* 4. report 'eff' statistics - only for "default" namespace*/
     int rc;
     bool res;
     rc = mcz_stats_is_default(stats, &res);
@@ -773,9 +719,7 @@ ssize_t mcz_maybe_compress(const void *src, size_t src_sz, const void *key, size
         atomic_inc64(&stats->skipped_comp_incomp, 1);
         return 0;
     }
-    atomic_inc64(&stats->bytes_raw_total, src_sz);
     atomic_inc64(&stats->bytes_cmp_total, csz);
-
 
     /* 6.  success ------------------------------------------------ */
     *dst         = dst_buf;          /* valid until same thread calls tls_ensure() again */
@@ -838,13 +782,14 @@ ssize_t mcz_maybe_decompress(const item *it, mc_resp    *resp) {
                (void*)ctx, (void*)it, (void*)resp);
         return -EINVAL; /* invalid arguments */
     }
-    /* 1. Skip if not compressed or chunked ------------------------ */
-     if (!(it->it_flags & ITEM_ZSTD) || (it->it_flags & ITEM_CHUNKED))
-         return 0;                         /* treat as plain payload */
-
+    
     /* Statistics */
     mcz_stats_atomic_t * stats = mcz_stats_lookup_by_key((const char *) ITEM_key(it), it->nkey);
     if(stats) atomic_inc64(&stats->reads_total, 1);
+    
+    /* 1. Skip if not compressed or chunked ------------------------ */
+     if (!(it->it_flags & ITEM_ZSTD) || (it->it_flags & ITEM_CHUNKED))
+         return 0;                         /* treat as plain payload */
     
      /* 2. Dictionary lookup --------------------------------------- */
      uint16_t  did = ITEM_get_dictid(it);
@@ -913,10 +858,10 @@ static void mcz_publish_table(mcz_table_t *tab) {
 int mcz_reload_dictionaries(void)
 {
     mcz_ctx_t *ctx = mcz_ctx_mut();
-    const char *dir = ctx->cfg.dict_dir;
+    const char *dir = ctx->cfg->dict_dir;
     char *err = NULL;
-    mcz_table_t *newtab = mcz_scan_dict_dir(dir, ctx->cfg.dict_retain_max,
-                                         ctx->cfg.gc_quarantine_period, ctx->cfg.zstd_level, &err);
+    mcz_table_t *newtab = mcz_scan_dict_dir(dir, ctx->cfg->dict_retain_max,
+                                         ctx->cfg->gc_quarantine_period, ctx->cfg->zstd_level, &err);
     if (err != NULL){
         fprintf(stderr, "reload dictionaries failed: %s\n", err ? err : "unknown error");
         free(err);
@@ -973,7 +918,7 @@ prefill_stats_snapshot_ns(mcz_stats_snapshot_t *snapshot, const char *ns, size_t
         snapshot->ewma_m          = mcz_eff_get_ewma();
         snapshot->baseline        = mcz_eff_get_baseline();
         snapshot->last_retrain_ms = mcz_eff_last_train_seconds() * 1000; /* seconds; field name kept */
-        snapshot->train_mode      = (uint32_t)ctx->cfg.train_mode;
+        snapshot->train_mode      = (uint32_t)ctx->cfg->train_mode;
     }
 
     return 0;

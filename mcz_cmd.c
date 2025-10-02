@@ -27,6 +27,10 @@
  *   - "mcz config [json]"
  *       Show current configuration, either as text lines or as a JSON object.
  *
+ *   - "mcz sampler [start|stop|status]"
+ *       Sampler control (spooling data, incoming key-value pairs to a file
+ *           for further analysis and dictionary creation).
+ *
  *   - PROTOCOL_BINARY_CMD_MCZ_STATS (0xE1)
  *       Binary version of "mcz stats".
  *
@@ -35,6 +39,9 @@
  *
  *   - PROTOCOL_BINARY_CMD_MCZ_CFG (0xE3)
  *       Binary configuration dump.
+ *
+ *   - PROTOCOL_BINARY_CMD_MCZ_SAMPLER (0xE4)
+ *       Binary sampler.
  *
  * Each handler builds the appropriate payload (text lines or JSON),
  * attaches it to a memcached response, and writes it back through
@@ -55,6 +62,8 @@
 #include <arpa/inet.h>
 
 #include "mcz_cmd.h"
+#include "mcz_config.h"
+
 #include "mcz_sampling.h"
 #include "proto_bin.h"
 
@@ -242,7 +251,6 @@ static int build_cfg_ascii(char **outp, size_t *lenp) {
     APP("CFG zstd_level %d\r\n", c->zstd_level);
     APP("CFG min_comp_size %zu\r\n", c->min_comp_size);
     APP("CFG max_comp_size %zu\r\n", c->max_comp_size);
-    APP("CFG min_savings %.6f\r\n", c->min_savings);
     APP("CFG compress_keys %s\r\n", b2s(c->compress_keys));
 
     APP("CFG enable_training %s\r\n", b2s(c->enable_training));
@@ -252,10 +260,8 @@ static int build_cfg_ascii(char **outp, size_t *lenp) {
     APP("CFG retrain_drop %.6f\r\n", c->retrain_drop);
     APP("CFG train_mode %s\r\n", train_mode_str(c->train_mode));
 
-    APP("CFG gc_run_interval %d\r\n", c->gc_run_interval);
     APP("CFG gc_cool_period %d\r\n", c->gc_cool_period);
     APP("CFG gc_quarantine_period %d\r\n", c->gc_quarantine_period);
-    APP("CFG dict_retain_hours %d\r\n", c->dict_retain_hours);
     APP("CFG dict_retain_max %d\r\n", c->dict_retain_max);
 
     APP("CFG enable_sampling %s\r\n", b2s(c->enable_sampling));
@@ -297,7 +303,6 @@ static int build_cfg_json(char **outp, size_t *lenp) {
         "\"zstd_level\":%d,\r\n"
         "\"min_comp_size\":%zu,\r\n"
         "\"max_comp_size\":%zu,\r\n"
-        "\"min_savings\":%.6f,\r\n"
         "\"compress_keys\":%s,\r\n"
 
         "\"enable_training\":%s,\r\n"
@@ -307,10 +312,8 @@ static int build_cfg_json(char **outp, size_t *lenp) {
         "\"retrain_drop\":%.6f,\r\n"
         "\"train_mode\":\"%s\",\r\n"
 
-        "\"gc_run_interval\":%d,\r\n"
         "\"gc_cool_period\":%d,\r\n"
         "\"gc_quarantine_period\":%d,\r\n"
-        "\"dict_retain_hours\":%d,\r\n"
         "\"dict_retain_max\":%d,\r\n"
 
         "\"enable_sampling\":%s,\r\n"
@@ -327,7 +330,6 @@ static int build_cfg_json(char **outp, size_t *lenp) {
         c->zstd_level,
         c->min_comp_size,
         c->max_comp_size,
-        c->min_savings,
         b2s(c->compress_keys),
 
         b2s(c->enable_training),
@@ -337,10 +339,8 @@ static int build_cfg_json(char **outp, size_t *lenp) {
         c->retrain_drop,
         train_mode_str(c->train_mode),
 
-        c->gc_run_interval,
         c->gc_cool_period,
         c->gc_quarantine_period,
-        c->dict_retain_hours,
         c->dict_retain_max,
 
         b2s(c->enable_sampling),

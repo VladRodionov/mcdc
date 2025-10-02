@@ -565,6 +565,8 @@ mcz_table_t *mcz_scan_dict_dir(const char *dir,
             memset(m, 0, sizeof(*m));
             if (parse_manifest_file(mfpath, dir, m) == 0) {
                 nmeta++;
+                /* Stub: to avoid warning during compilation */
+                verify_manifest_signature(m);
             } else {
                 free_dict_meta(m);
             }

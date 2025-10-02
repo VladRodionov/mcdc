@@ -51,7 +51,7 @@ void process_mcz_ns_bin(conn *c);
 /* Binary: MCZ_CFG (0xE3) */
 void process_mcz_cfg_bin(conn *c);
 
-/* Binary: MCZ_STATS 0xE4 */
+/* Binary: MCZ_SAMPLER 0xE4 */
 void process_mcz_sampler_bin(conn *c);
 
 /* Ascii handler */

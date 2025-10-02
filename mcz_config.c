@@ -38,6 +38,13 @@
 #include "memcached.h"                  /* settings, mcz_cfg_t          */
 #include "mcz_config.h"
 
+
+static mcz_cfg_t g_cfg = {0};
+
+mcz_cfg_t * mcz_config_get(void) {
+    return &g_cfg;
+}
+
 /* Trim helpers unchanged ... */
 
 /* size parser: accepts K,KB,KiB,M,MB,MiB,G,GB,GiB (case-insensitive) */
@@ -142,17 +149,45 @@ static void rtrim(char *s)
         *p = '\0';
 }
 
+static void init_default(void) {
+    //TODO: move defaults to mcz_config.h
+    g_cfg.enable_comp = false;
+    g_cfg.enable_dict = false;
+    g_cfg.dict_dir = NULL;
+    g_cfg.dict_size = 256*1024;
+    g_cfg.zstd_level = 3;
+    g_cfg.min_comp_size = 32;
+    g_cfg.max_comp_size = 100*1024;
 
-#ifdef USE_ZSTD
+    g_cfg.enable_training = true;
+    g_cfg.retraining_interval_s = 2*60*60;
+    g_cfg.min_training_size = 0;
+    g_cfg.ewma_alpha = 0.05;
+    g_cfg.retrain_drop = 0.1;
+    g_cfg.train_mode = MCZ_TRAIN_FAST;
+    
+    g_cfg.gc_cool_period = 3600;
+    g_cfg.gc_quarantine_period = 3600 * 24 * 7;
+
+    g_cfg.dict_retain_max = 10;
+
+    g_cfg.enable_sampling = true;
+    g_cfg.sample_p = 0.02;
+    g_cfg.spool_dir = NULL;
+    g_cfg.spool_max_bytes = 64*1024*1024;
+    g_cfg.compress_keys = false;
+}
+
 /*-------------------------------------------------------------------------*/
 int parse_mcz_config(const char *path)
 {
+    init_default();
     FILE *fp = fopen(path, "r");
     if (!fp) {
         fprintf(stderr, "zstd: cannot open %s: %s\n", path, strerror(errno));
         return -errno;
     }
-
+    
     char  *line = NULL;
     size_t cap  = 0;
     int    rc   = 0;
@@ -178,136 +213,86 @@ int parse_mcz_config(const char *path)
         rtrim(val);
 
         /* --- dispatch -------------------------------------------------- */
-        /* Back-compat legacy keys (keep but warn) */
-        if (strcasecmp(key, "level") == 0 || strcasecmp(key, "mcz.level") == 0) {
+        if (strcasecmp(key, "mcz.level") == 0) {
             char *end; errno = 0; long lvl = strtol(val, &end, 10);
             if (end == val || *end || errno) { fprintf(stderr, "%s:%d: invalid level '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             if (lvl < 1 || lvl > 22) { fprintf(stderr, "%s:%d: level %ld out of range (1-22)\n", path, ln, lvl); rc = rc?rc:-ERANGE; continue; }
-            settings.zstd_level = (int)lvl;
+            g_cfg.zstd_level = (int)lvl;
 
-        } else if (strcasecmp(key, "max_dict") == 0 || strcasecmp(key, "mcz.dict_size") == 0) {
+        } else if (strcasecmp(key, "mcz.dict_size") == 0) {
             int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad dict size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-            settings.mcz_dict_size = (size_t)v;
+            g_cfg.dict_size = (size_t)v;
             if (!strcasecmp(key,"max_dict")) fprintf(stderr, "%s:%d: NOTE: 'max_dict' is deprecated; use 'mcz.dict_size'\n", path, ln);
-
-        } else if (strcasecmp(key, "min_train_size") == 0 || strcasecmp(key, "mcz.min_training_size") == 0) {
-            int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad min_training_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-            settings.mcz_min_training_size = (size_t)v;
-            if (!strcasecmp(key,"min_train_size")) fprintf(stderr, "%s:%d: NOTE: 'min_train_size' is deprecated; use 'mcz.min_training_size'\n", path, ln);
-
-        } else if (strcasecmp(key, "min_comp_size") == 0 || strcasecmp(key, "mcz.min_size") == 0) {
-            int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad min_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-            settings.mcz_min_size = (size_t)v;
-
-        } else if (strcasecmp(key, "max_comp_size") == 0 || strcasecmp(key, "mcz.max_size") == 0) {
-            int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad max_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-            settings.mcz_max_size = (size_t)v;
-
-        } else if (strcasecmp(key, "dict_dir_path") == 0 || strcasecmp(key, "mcz.dict_dir") == 0) {
-            free(settings.mcz_dict_dir);
-            settings.mcz_dict_dir = val && *val ? strdup(val) : NULL;
-            if (!strcasecmp(key,"dict_dir_path")) fprintf(stderr, "%s:%d: NOTE: 'dict_dir_path' is deprecated; use 'mcz.dict_dir'\n", path, ln);
-
-        } else if (strcasecmp(key, "disable_dict") == 0 || strcasecmp(key, "mcz.enable_dict") == 0) {
-            if (!strcasecmp(key, "disable_dict")) {
-                bool b; if (parse_bool(val, &b)) { fprintf(stderr, "%s:%d: bad bool '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-                settings.mcz_enable_dict = !b;
-                fprintf(stderr, "%s:%d: NOTE: 'disable_dict' is deprecated; use 'mcz.enable_dict'\n", path, ln);
-            } else {
-                bool b; if (parse_bool(val, &b)) { fprintf(stderr, "%s:%d: bad bool '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-                settings.mcz_enable_dict = b;
-            }
-
-        } else if (strcasecmp(key, "disable_comp") == 0 || strcasecmp(key, "mcz.enable_comp") == 0) {
-            if (!strcasecmp(key, "disable_comp")) {
-                bool b; if (parse_bool(val, &b)) { fprintf(stderr, "%s:%d: bad bool '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-                settings.mcz_enable_comp = !b;
-                fprintf(stderr, "%s:%d: NOTE: 'disable_comp' is deprecated; use 'mcz.enable_comp'\n", path, ln);
-            } else {
-                bool b; if (parse_bool(val, &b)) { fprintf(stderr, "%s:%d: bad bool '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-                settings.mcz_enable_comp = b;
-            }
-
-        } else if (strcasecmp(key, "mcz.min_savings") == 0) {
-            double d; if (parse_frac(val, &d)) { fprintf(stderr, "%s:%d: bad min_savings '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-            settings.mcz_min_savings = d;
-            
-            /* Training */
-        } else if (strcasecmp(key, "mcz.enable_training") == 0) {
-            bool b; if (parse_bool(val, &b)) { fprintf(stderr, "%s:%d: bad bool '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-            settings.mcz_enable_training = b;
-
-        } else if (strcasecmp(key, "mcz.retraining_interval") == 0) {
-            int64_t s; if (parse_duration_sec(val, &s)) { fprintf(stderr, "%s:%d: bad retraining_interval '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-            settings.mcz_retraining_interval_s = s;
 
         } else if (strcasecmp(key, "mcz.min_training_size") == 0) {
             int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad min_training_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-            settings.mcz_min_training_size = (size_t)v;
+            g_cfg.min_training_size = (size_t)v;
+            if (!strcasecmp(key,"min_train_size")) fprintf(stderr, "%s:%d: NOTE: 'min_train_size' is deprecated; use 'mcz.min_training_size'\n", path, ln);
 
+        } else if (strcasecmp(key, "mcz.min_size") == 0) {
+            int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad min_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            g_cfg.min_comp_size = (size_t)v;
+
+        } else if (strcasecmp(key, "mcz.max_size") == 0) {
+            int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad max_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            g_cfg.max_comp_size = (size_t)v;
+
+        } else if (strcasecmp(key, "mcz.dict_dir") == 0) {
+            g_cfg.dict_dir = val && *val ? strdup(val) : NULL;
+            if (!strcasecmp(key,"dict_dir_path")) fprintf(stderr, "%s:%d: NOTE: 'dict_dir_path' is deprecated; use 'mcz.dict_dir'\n", path, ln);
+
+        } else if (strcasecmp(key, "mcz.enable_dict") == 0) {
+            bool b; if (parse_bool(val, &b)) { fprintf(stderr, "%s:%d: bad bool '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            g_cfg.enable_dict = b;
+        } else if (strcasecmp(key, "mcz.enable_comp") == 0) {
+            bool b; if (parse_bool(val, &b)) { fprintf(stderr, "%s:%d: bad bool '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            g_cfg.enable_comp = b;
+        } else if (strcasecmp(key, "mcz.enable_training") == 0) {
+            bool b; if (parse_bool(val, &b)) { fprintf(stderr, "%s:%d: bad bool '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            g_cfg.enable_training = b;
+        } else if (strcasecmp(key, "mcz.retraining_interval") == 0) {
+            int64_t s; if (parse_duration_sec(val, &s)) { fprintf(stderr, "%s:%d: bad retraining_interval '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            g_cfg.retraining_interval_s = s;
+        } else if (strcasecmp(key, "mcz.min_training_size") == 0) {
+            int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad min_training_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            g_cfg.min_training_size = (size_t)v;
         } else if (strcasecmp(key, "mcz.ewma_alpha") == 0) {
             double d; if (parse_frac(val, &d)) { fprintf(stderr, "%s:%d: bad ewma_alpha '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-            settings.mcz_ewma_alpha = d;
-
+            g_cfg.ewma_alpha = d;
         } else if (strcasecmp(key, "mcz.retrain_drop") == 0) {
             double d; if (parse_frac(val, &d)) { fprintf(stderr, "%s:%d: bad retrain_drop '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-            settings.mcz_retrain_drop = d;
-            
+            g_cfg.retrain_drop = d;
         } else if (!strcasecmp(key, "mcz.train_mode")) {
             mcz_train_mode_t mode;
             if(parse_train_mode(val, &mode)) { fprintf(stderr, "%s:%d: bad train_mode'%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue;}
-            settings.mcz_train_mode = mode;
-        } else if (strcasecmp(key, "mcz.gc_run_interval") == 0) {
-                int64_t s; if (parse_duration_sec(val, &s)) { fprintf(stderr, "%s:%d: bad gc_run_interval '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-                settings.mcz_gc_run_interval = s;
-            
+            g_cfg.train_mode = mode;
         } else if (strcasecmp(key, "mcz.gc_cool_period") == 0) {
             int64_t s; if (parse_duration_sec(val, &s)) { fprintf(stderr, "%s:%d: bad gc_cool_period '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-            settings.mcz_gc_cool_period = s;
-            
+            g_cfg.gc_cool_period = s;
         } else if (strcasecmp(key, "mcz.gc_quarantine_period") == 0) {
                int64_t s; if (parse_duration_sec(val, &s)) { fprintf(stderr, "%s:%d: bad gc_quarantine_period '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-               settings.mcz_gc_quarantine_period = s;
+            g_cfg.gc_quarantine_period = s;
         /* Retention */
-        } else if (strcasecmp(key, "mcz.dict_retain_hours") == 0) {
-            char *end; long v = strtol(val, &end, 10);
-            if (val == end || *end || v < 0 || v > 24*365) { fprintf(stderr, "%s:%d: bad dict_retain_hours '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-            settings.mcz_dict_retain_hours = (int)v;
-
         } else if (strcasecmp(key, "mcz.dict_retain_max") == 0) {
             char *end; long v = strtol(val, &end, 10);
             if (val == end || *end || v < 1 || v > 256) { fprintf(stderr, "%s:%d: bad dict_retain_max '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-            settings.mcz_dict_retain_max = (int)v;
+            g_cfg.dict_retain_max = (int)v;
 
             /* Sampling + Spool */
         } else if (strcasecmp(key, "mcz.enable_sampling") == 0) {
             bool b; if (parse_bool(val, &b)) { fprintf(stderr, "%s:%d: bad bool '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-            settings.mcz_enable_sampling = b;
-
+            g_cfg.enable_sampling = b;
         } else if (strcasecmp(key, "mcz.sample_p") == 0) {
             double d; if (parse_frac(val, &d)) { fprintf(stderr, "%s:%d: bad sample_p '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-            settings.mcz_sample_p = d;
-
-        } else if (strcasecmp(key, "mcz.sample_window_sec") == 0) {
-            char *end; long v = strtol(val, &end, 10);
-            if (val == end || *end || v < 1 || v > (24*3600)) { fprintf(stderr, "%s:%d: bad sample_window_sec '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-            settings.mcz_sample_window_sec = (int)v;
-
-        } else if (strcasecmp(key, "mcz.sample_roll_bytes") == 0) {
-            int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad sample_roll_bytes '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-            settings.mcz_sample_roll_bytes = (size_t)v;
-
+            g_cfg.sample_p = d;
         } else if (strcasecmp(key, "mcz.spool_dir") == 0) {
-            free(settings.mcz_spool_dir); settings.mcz_spool_dir = val && *val ? strdup(val) : NULL;
-
+            g_cfg.spool_dir = val && *val ? strdup(val) : NULL;
         } else if (strcasecmp(key, "mcz.spool_max_bytes") == 0) {
             int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad spool_max_bytes '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
-            settings.mcz_spool_max_bytes = (size_t)v;
-
+            g_cfg.spool_max_bytes = (size_t)v;
         } else if (strcasecmp(key, "compress_keys") == 0) {
             /* legacy: ignored in MCZ; accept to avoid breaking configs */
             fprintf(stderr, "%s:%d: NOTE: 'compress_keys' ignored\n", path, ln);
-
         } else {
             fprintf(stderr, "%s:%d: unknown key '%s'\n", path, ln, key);
             /* not fatal; continue */
@@ -316,16 +301,16 @@ int parse_mcz_config(const char *path)
     free(line);
     fclose(fp);
     /* basic sanity checks */
-    if (settings.mcz_min_size > settings.mcz_max_size) {
+    if (g_cfg.min_comp_size > g_cfg.max_comp_size) {
         fprintf(stderr, "mcz: min_size > max_size\n"); rc = rc?rc:-EINVAL; goto err;
     }
-    if (settings.mcz_enable_sampling && (settings.mcz_sample_p <= 0.0 || settings.mcz_sample_p > 1.0)) {
+    if (g_cfg.enable_sampling && (g_cfg.sample_p <= 0.0 || g_cfg.sample_p > 1.0)) {
         fprintf(stderr, "mcz: sample_p must be in (0,1]\n"); rc = rc?rc:-ERANGE; goto err;
     }
-    if (settings.mcz_dict_dir == NULL && settings.mcz_enable_comp && settings.mcz_enable_dict){
+    if (g_cfg.dict_dir == NULL && g_cfg.enable_comp && g_cfg.enable_dict){
         fprintf(stderr, "mcz: dictionary directory is not specified\n"); rc = rc?rc:-EINVAL; goto err;
     }
-    if (settings.mcz_spool_dir == NULL && settings.mcz_enable_comp && settings.mcz_enable_dict){
+    if (g_cfg.spool_dir == NULL && g_cfg.enable_comp && g_cfg.enable_dict){
         fprintf(stderr, "mcz: spoll directory is not specified\n"); rc = rc?rc:-EINVAL; goto err;
     }
 
@@ -333,8 +318,8 @@ int parse_mcz_config(const char *path)
     
 err: // set compression to disabled
     fprintf(stderr, "mcz: compression disabled due to an error in the configuration file\n");
-    settings.mcz_enable_comp = false;
-    settings.mcz_enable_dict = false;
+    g_cfg.enable_comp = false;
+    g_cfg.enable_dict = false;
     return rc;
 }
 
@@ -362,7 +347,6 @@ void mcz_config_print(const mcz_cfg_t *cfg) {
     printf("zstd_level         : %d\n", cfg->zstd_level);
     printf("min_comp_size      : %zu\n", cfg->min_comp_size);
     printf("max_comp_size      : %zu\n", cfg->max_comp_size);
-    printf("min_savings        : %.3f\n", cfg->min_savings);
     printf("compress_keys      : %s\n", cfg->compress_keys ? "true" : "false");
 
     // Training
@@ -374,12 +358,10 @@ void mcz_config_print(const mcz_cfg_t *cfg) {
     printf("train_mode         : %s\n", train_mode_to_str(cfg->train_mode));
 
     // GC
-    printf("gc_run_interval    : %d\n", cfg->gc_run_interval);
     printf("gc_cool_period     : %d\n", cfg->gc_cool_period);
     printf("gc_quarantine_period : %d\n", cfg->gc_quarantine_period);
 
     // Retention
-    printf("dict_retain_hours  : %d\n", cfg->dict_retain_hours);
     printf("dict_retain_max    : %d\n", cfg->dict_retain_max);
 
     // Sampling + Spool
@@ -392,4 +374,4 @@ void mcz_config_print(const mcz_cfg_t *cfg) {
 
     printf("=========================\n");
 }
-#endif
+

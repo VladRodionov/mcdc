@@ -84,7 +84,7 @@ typedef struct mcz_ctx_s {
     _Atomic(size_t) bytes_pending;                /* atomically updated         */
     //TODO: not used
     pthread_t trainer_tid;
-    mcz_cfg_t cfg;                                /* mcz configuration */
+    mcz_cfg_t *cfg;                                /* mcz configuration */
     _Atomic(uintptr_t) dict_table;                /* Current dictionary routing table */
     _Atomic(mcz_retired_node_t*) gc_retired_head; /* MPSC stack head */
     _Atomic(bool)               gc_stop;          /* signal to stop GC thread */
@@ -109,7 +109,7 @@ typedef struct _mc_resp mc_resp;  /* defined in memcached.c */
 
 
 /* Global init / destroy */
-int mcz_init(mcz_cfg_t *cfg);
+int mcz_init(void);
 void mcz_destroy(void);
 
 /* Fast-path API for Memcached */
@@ -130,8 +130,6 @@ ssize_t mcz_maybe_decompress(const item *it, mc_resp    *resp);
 const mcz_ctx_t *mcz_ctx(void);
 mcz_ctx_t       *mcz_ctx_mut(void);
 
-int mcz_cfg_init(mcz_cfg_t *cfg);
-
 /* Feed raw samples for future dictionary training and file spooling*/
 void mcz_sample(const void *key, size_t klen, const void *value, size_t vlen);
 
@@ -144,7 +142,5 @@ mcz_match_namespace(const char *key, size_t klen,
 int mcz_get_stats_snapshot(mcz_stats_snapshot_t *snap, const char *ns, size_t ns_sz);
 
 const char ** mcz_list_namespaces(size_t *count);
-
-mcz_cfg_t * mcz_config_get(void);
 
 #endif /* MCZ_COMPRESSION_H */

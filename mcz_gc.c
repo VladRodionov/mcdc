@@ -57,12 +57,12 @@
 /* ---------- Helpers ---------- */
 
 static inline unsigned get_cool(const mcz_ctx_t *ctx) {
-    unsigned v = ctx->cfg.gc_cool_period;
+    unsigned v = ctx->cfg->gc_cool_period;
     return v ? v : 3600u; /* default 1h */
 }
 
 static inline unsigned get_quarantine(const mcz_ctx_t *ctx) {
-    unsigned v = ctx->cfg.gc_quarantine_period;
+    unsigned v = ctx->cfg->gc_quarantine_period;
     return v ? v : 3600u * 7 * 24; /* default 7d */
 }
 

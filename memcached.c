@@ -278,40 +278,7 @@ static void settings_init(void) {
 #ifdef SOCK_COOKIE_ID
     settings.sock_cookie_id = 0;
 #endif
-#ifdef USE_ZSTD
-    //TODO: move defaults to mcz_config.h
-    settings.mcz_enable_comp = false;
-    settings.mcz_enable_dict = false;
-    settings.mcz_dict_dir = NULL;
-    settings.mcz_dict_size = 256*1024;
-    settings.zstd_level = 3;
-    settings.mcz_min_size = 32;
-    settings.mcz_max_size = 100*1024;
-    settings.mcz_min_savings = 0.05;
 
-    settings.mcz_enable_training = true;
-    settings.mcz_retraining_interval_s = 2*60*60; 
-    settings.mcz_min_training_size = 0;
-    settings.mcz_ewma_alpha = 0.05;
-    settings.mcz_retrain_drop = 0.1;
-    settings.mcz_train_mode = MCZ_TRAIN_FAST;
-    
-    settings.mcz_gc_run_interval = 3600;
-    settings.mcz_gc_cool_period = 3600;
-    settings.mcz_gc_quarantine_period = 3600 * 24 * 7;
-
-    settings.mcz_dict_retain_hours = 7*24;
-    settings.mcz_dict_retain_max = 10;
-
-    settings.mcz_enable_sampling = true;
-    settings.mcz_sample_p = 0.02;
-    settings.mcz_sample_window_sec = 300;
-    settings.mcz_sample_roll_bytes = 32*1024*1024;
-    settings.mcz_spool_dir = NULL;
-    settings.mcz_spool_max_bytes = 64*1024*1024;
-    settings.mcz_compress_keys = false;
-
-#endif
 }
 
 extern pthread_mutex_t conn_lock;
@@ -6113,13 +6080,7 @@ int main (int argc, char **argv) {
     }
 #endif
 #ifdef USE_ZSTD
-    extern mcz_ctx_t g_mcz;
-        //TODO: do we really need to duplicate this configuration on memcached settings?
-    if (mcz_cfg_init(&g_mcz.cfg) != 0) {
-        fprintf(stderr, "fatal: bad zstd configuration\n");
-        exit(EXIT_FAILURE);
-    }
-    mcz_init(&g_mcz.cfg);
+    mcz_init();
 #endif
     if (settings.drop_privileges) {
         setup_privilege_violations_handler();

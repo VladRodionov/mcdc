@@ -49,7 +49,6 @@ typedef struct {
     int      zstd_level;            // reuse existing
     size_t   min_comp_size;         // compress if >=
     size_t   max_comp_size;         // compress if <=
-    double   min_savings;           // 0..1 (skip if below)
     bool     compress_keys;         // compress key (false, not implemented yet)
 
     // Training
@@ -61,11 +60,9 @@ typedef struct {
     mcz_train_mode_t train_mode;    // FAST (default) or OPTIMIZE
     
     // GC
-    int32_t gc_run_interval;
     int32_t gc_cool_period;         // default, 1h - time to keep retired dictionary data in memory
     int32_t gc_quarantine_period;    // default: 7d, time to keep retired dictionary in a file system
     // Retention
-    int      dict_retain_hours;     // keep dicts <= N hours (not used)
     int      dict_retain_max;       // cap count of resident old dicts
 
     // Sampling + Spool
@@ -94,5 +91,7 @@ typedef struct {
 int parse_mcz_config(const char *path);
 
 void mcz_config_print(const mcz_cfg_t *cfg);
+
+mcz_cfg_t * mcz_config_get(void);
 
 #endif /* MCZ_CONFIG_H */
