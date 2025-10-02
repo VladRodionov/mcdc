@@ -132,8 +132,8 @@ mcz_ctx_t       *mcz_ctx_mut(void);
 
 int mcz_cfg_init(mcz_cfg_t *cfg);
 
-/* Feed raw samples for future dictionary training */
-void mcz_sample(const void *buf, size_t len);
+/* Feed raw samples for future dictionary training and file spooling*/
+void mcz_sample(const void *key, size_t klen, const void *value, size_t vlen);
 
 int mcz_reload_dictionaries(void);
 

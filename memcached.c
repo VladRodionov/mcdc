@@ -308,7 +308,7 @@ static void settings_init(void) {
     settings.mcz_sample_window_sec = 300;
     settings.mcz_sample_roll_bytes = 32*1024*1024;
     settings.mcz_spool_dir = NULL;
-    settings.mcz_spool_max_bytes = 4ULL*1024*1024*1024;
+    settings.mcz_spool_max_bytes = 64*1024*1024;
     settings.mcz_compress_keys = false;
 
 #endif
@@ -1542,8 +1542,8 @@ static void complete_nread(conn *c) {
                                        &cbuf, &did);
 
     if (clen > 0) {             /* Success → store compressed copy */
-        /* 0. Add to dictinary training set (if necessary) */
-        mcz_sample(ITEM_data(oit), oit->nbytes);
+        /* 0. Add to dictinary training set and to sampler (if necessary) */
+        mcz_sample(ITEM_key(oit), oit->nkey, ITEM_data(oit), oit->nbytes);
         /* 1. Allocate a new, smaller item in the correct slab class    */
         item *nit = do_item_alloc(ITEM_key(oit), oit->nkey,
                                   c->req_client_flags, oit->exptime, (int)clen);

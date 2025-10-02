@@ -85,7 +85,7 @@ if HAVE_ZSTD
 memcached_SOURCES +=  mcz_compression.c mcz_compression.h mcz_config.c mcz_config.h \
                       mcz_incompressible.h mcz_incompressible.c mcz_dict.h mcz_dict.c mcz_utils.h mcz_utils.c \
                       mcz_gc.h mcz_gc.c mcz_dict_pool.h mcz_dict_pool.c mcz_eff_atomic.h mcz_eff_atomic.c \
-                      mcz_stats.h mcz_stats.c mcz_cmd.h mcz_cmd.c
+                      mcz_stats.h mcz_stats.c mcz_cmd.h mcz_cmd.c mcz_sampling.h mcz_sampling.c
 endif
 
 if ENABLE_TLS

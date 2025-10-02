@@ -52,6 +52,7 @@
 #include "mcz_gc.h"
 #include "mcz_dict_pool.h"
 #include "mcz_eff_atomic.h"
+#include "mcz_sampling.h"
 
 
 static __thread tls_cache_t tls; /* zero-initialised */
@@ -428,7 +429,7 @@ static void* trainer_main(void *arg) {
             }
             if (stats) atomic_inc64(&stats->trainer_errs, 1);
         } else {
-            if (settings.verbose > 1) {
+            if (settings.verbose > 0) {
                 log_rate_limited(1000000ULL,
                     "mcz-dict: new dict (%zu B) built from %zu samples\n", dict_sz, count);
             }
@@ -524,7 +525,7 @@ int mcz_init(mcz_cfg_t *cfg) {
     if (!cfg->enable_dict) {
         return 0;
     }
-    /* ---------------- init statistics module ------------------------------*/
+    /* ---------------- init statistics module ----------------------------*/
     mcz_stats_registry_global_init(0);
     /* try external dictionary first */
     mcz_load_dicts();
@@ -540,16 +541,18 @@ int mcz_init(mcz_cfg_t *cfg) {
     mcz_eff_configure(&ecfg);                 /* single-threaded init */
     mcz_eff_init((uint64_t)time(NULL));
     
-    /* ---------------- init retired dictionaries pool ----------------------*/
+    /* ---------------- init retired dictionaries pool --------------------- */
     mcz_dict_pool_init();
     /* ---------------- spawn background trainer --------------------------- */
     mcz_start_trainer(ctx);
-    /* ---------------- spawn background garbage collector --------------------------- */
+    /* ---------------- spawn background garbage collector ------------------ */
     mcz_gc_start(ctx);
     if (settings.verbose > 1) {
         log_rate_limited(0ULL,
                          "mcz-dict: GC thread started (gc_run_interval=%zu sec)\n", ctx->cfg.gc_run_interval);
     }
+    /* ---------------  initialize sampler subsystem --------------------------*/
+    mcz_sampler_init(cfg->spool_dir, cfg->sample_p, cfg->spool_max_bytes);
     return 0;
 }
 
@@ -581,8 +584,7 @@ void mcz_destroy(void) {
 
 }
 
-
-void mcz_sample(const void *src, size_t len) {
+static void sample_for_training(const void *src, size_t len) {
     mcz_ctx_t *ctx = mcz_ctx_mut();
     /* skip very large and very small items */
     if (len >ctx->cfg.max_comp_size || len < ctx->cfg.min_comp_size)
@@ -643,15 +645,12 @@ void mcz_sample(const void *src, size_t len) {
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* Decompress a value into an iovec array.                             *
- *  - src/src_sz : compressed buffer                                   *
- *  - dst/dst_cnt: scatter-gather destination                          *
- *  - dict_id    : 0 = no dict, ≥1 = dictionary selector               *
- * Returns:                                                            *
- *    ≥0  decompressed bytes                                           *
- *   < 0  negative errno / ZSTD error code                             */
-/* ------------------------------------------------------------------ */
+void mcz_sample(const void *key, size_t klen, const void* value, size_t vlen) {
+    sample_for_training(value, vlen);
+    mcz_sampler_maybe_record(key, klen, value, vlen);
+}
+
+
 static inline const ZSTD_DDict*
 get_ddict_by_id(uint16_t id)
 {
@@ -783,7 +782,15 @@ ssize_t mcz_maybe_compress(const void *src, size_t src_sz, const void *key, size
     *dict_id_out = did;              /* 0 = no dictionary             */
     return (ssize_t)csz;
 }
-
+/* ------------------------------------------------------------------ */
+/* Decompress a value into an iovec array.                             *
+ *  - src/src_sz : compressed buffer                                   *
+ *  - dst/dst_cnt: scatter-gather destination                          *
+ *  - dict_id    : 0 = no dict, ≥1 = dictionary selector               *
+ * Returns:                                                            *
+ *    ≥0  decompressed bytes                                           *
+ *   < 0  negative errno / ZSTD error code                             */
+/* ------------------------------------------------------------------ */
 ssize_t mcz_decompress(const void *src,
         size_t src_sz, void *dst, size_t dst_sz, uint16_t dict_id) {
     mcz_ctx_t *ctx = mcz_ctx_mut();

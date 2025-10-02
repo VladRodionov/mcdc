@@ -323,4 +323,59 @@ int parse_mcz_config(const char *path)
     fclose(fp);
     return rc;      /* 0 if perfect, first fatal errno otherwise */
 }
+
+static const char *train_mode_to_str(mcz_train_mode_t mode) {
+    switch (mode) {
+        case MCZ_TRAIN_FAST:     return "FAST";
+        case MCZ_TRAIN_OPTIMIZE: return "OPTIMIZE";
+        default:                 return "UNKNOWN";
+    }
+}
+
+void mcz_config_print(const mcz_cfg_t *cfg) {
+    if (!cfg) {
+        printf("(null config)\n");
+        return;
+    }
+
+    printf("=== MCZ Configuration ===\n");
+
+    // Core
+    printf("enable_comp        : %s\n", cfg->enable_comp ? "true" : "false");
+    printf("enable_dict        : %s\n", cfg->enable_dict ? "true" : "false");
+    printf("dict_dir           : %s\n", cfg->dict_dir ? cfg->dict_dir : "(null)");
+    printf("dict_size          : %zu\n", cfg->dict_size);
+    printf("zstd_level         : %d\n", cfg->zstd_level);
+    printf("min_comp_size      : %zu\n", cfg->min_comp_size);
+    printf("max_comp_size      : %zu\n", cfg->max_comp_size);
+    printf("min_savings        : %.3f\n", cfg->min_savings);
+    printf("compress_keys      : %s\n", cfg->compress_keys ? "true" : "false");
+
+    // Training
+    printf("enable_training    : %s\n", cfg->enable_training ? "true" : "false");
+    printf("retraining_interval_s : %" PRId64 "\n", cfg->retraining_interval_s);
+    printf("min_training_size  : %zu\n", cfg->min_training_size);
+    printf("ewma_alpha         : %.3f\n", cfg->ewma_alpha);
+    printf("retrain_drop       : %.3f\n", cfg->retrain_drop);
+    printf("train_mode         : %s\n", train_mode_to_str(cfg->train_mode));
+
+    // GC
+    printf("gc_run_interval    : %d\n", cfg->gc_run_interval);
+    printf("gc_cool_period     : %d\n", cfg->gc_cool_period);
+    printf("gc_quarantine_period : %d\n", cfg->gc_quarantine_period);
+
+    // Retention
+    printf("dict_retain_hours  : %d\n", cfg->dict_retain_hours);
+    printf("dict_retain_max    : %d\n", cfg->dict_retain_max);
+
+    // Sampling + Spool
+    printf("enable_sampling    : %s\n", cfg->enable_sampling ? "true" : "false");
+    printf("sample_p           : %.3f\n", cfg->sample_p);
+    printf("sample_window_sec  : %d\n", cfg->sample_window_sec);
+    printf("sample_roll_bytes  : %zu\n", cfg->sample_roll_bytes);
+    printf("spool_dir          : %s\n", cfg->spool_dir ? cfg->spool_dir : "(null)");
+    printf("spool_max_bytes    : %zu\n", cfg->spool_max_bytes);
+
+    printf("=========================\n");
+}
 #endif

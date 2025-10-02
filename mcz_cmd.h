@@ -40,6 +40,7 @@
 #define PROTOCOL_BINARY_CMD_MCZ_NS 0xE2
 #define PROTOCOL_BINARY_CMD_MCZ_CFG 0xE3
 
+#define PROTOCOL_BINARY_CMD_MCZ_SAMPLER 0xE4
 
 /* Binary: MCZ_STATS 0xE1 */
 void process_mcz_stats_bin(conn *c);
@@ -49,6 +50,9 @@ void process_mcz_ns_bin(conn *c);
 
 /* Binary: MCZ_CFG (0xE3) */
 void process_mcz_cfg_bin(conn *c);
+
+/* Binary: MCZ_STATS 0xE4 */
+void process_mcz_sampler_bin(conn *c);
 
 /* Ascii handler */
 void process_mcz_command_ascii(conn *c, token_t *tokens, const size_t ntokens);

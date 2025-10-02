@@ -93,4 +93,6 @@ typedef struct {
  *-------------------------------------------------------------------*/
 int parse_mcz_config(const char *path);
 
+void mcz_config_print(const mcz_cfg_t *cfg);
+
 #endif /* MCZ_CONFIG_H */

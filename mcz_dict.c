@@ -532,6 +532,7 @@ mcz_table_t *mcz_scan_dict_dir(const char *dir,
                                int comp_level,
                                char **err_out)
 {
+    
     if (!dir || !*dir) { set_err(err_out, "mcz_scan_dict_dir: empty dir"); return NULL; }
     if (max_per_ns == 0) max_per_ns = 1;
 
@@ -557,7 +558,7 @@ mcz_table_t *mcz_scan_dict_dir(const char *dir,
                 metas = (mcz_dict_meta_t*)tmp; cmeta = nc;
             }
 
-            char mfpath[PATH_MAX];
+            char mfpath[PATH_MAX] = {0};
             if (join_path(mfpath, sizeof(mfpath), dir, name)) continue;
 
             mcz_dict_meta_t *m = &metas[nmeta];
@@ -565,7 +566,6 @@ mcz_table_t *mcz_scan_dict_dir(const char *dir,
             if (parse_manifest_file(mfpath, dir, m) == 0) {
                 nmeta++;
             } else {
-                /*DEBUG*/ fprintf(stderr, "parse manifest file failed %s: %s\n", dir, mfpath);
                 free_dict_meta(m);
             }
         }
@@ -760,7 +760,10 @@ const mcz_dict_meta_t *mcz_pick_dict(const mcz_table_t *tab, const char *key, si
 }
 
 bool mcz_has_default_dict(const mcz_table_t *tab){
-    if (!tab) return NULL;
+
+    if (!tab) {
+        return false;
+    }
     for (size_t i=0;i<tab->nspaces;i++) {
         mcz_ns_entry_t *sp = tab->spaces[i];
         if (!sp->ndicts) continue;
