@@ -1032,28 +1032,22 @@ item *do_item_get(const char *key, const size_t nkey, const uint32_t hv, LIBEVEN
             if (do_update) {
                 do_item_bump(t, it, hv);
             }
+#ifdef USE_ZSTD
             if ((it->it_flags & ITEM_ZSTD) != 0) {
-                size_t const rSize = ZSTD_getFrameContentSize(ITEM_data(it), it->nbytes);
-                if (rSize != ZSTD_CONTENTSIZE_ERROR && rSize != ZSTD_CONTENTSIZE_UNKNOWN) {
-                    char* rBuff = malloc(rSize);
-                    if (rBuff != NULL) {
-                        size_t const dSize = 0; //zstd_decompress_item(&settings.zstd_dict, ITEM_data(it), it->nbytes, rBuff, rSize);
-                        if (dSize == rSize) {
-                            // Create a new item for the decompressed data
-                            item *new_it = item_alloc(ITEM_key(it), it->nkey, 0, it->exptime, rSize);
-                            if (new_it) {
-                                memcpy(ITEM_data(new_it), rBuff, rSize);
-                                ITEM_set_cas(new_it, ITEM_get_cas(it));
-                                new_it->it_flags = it->it_flags & ~ITEM_ZSTD;
-                                do_item_replace(it, new_it, hv, ITEM_get_cas(new_it));
-                                do_item_remove(it);
-                                it = new_it;
-                            }
-                        }
-                        free(rBuff);
+                uint16_t  did = ITEM_get_dictid(it);
+                if (did > 0 && !mcz_dict_exists(did)){
+                    do_item_unlink(it, hv);
+                    STORAGE_delete(t->storage, it);
+                    do_item_remove(it);
+                    it = NULL;
+                    
+                    if (settings.verbose > 2) {
+                        fprintf(stderr, " -nuked by missing dictionary error");
                     }
+                    was_found = 4;
                 }
             }
+#endif
             DEBUG_REFCNT(it, '+');
         }
     }

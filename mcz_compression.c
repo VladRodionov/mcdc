@@ -658,6 +658,14 @@ mcz_match_namespace(const char *key, size_t klen,
     }
     return best;
 }
+
+bool mcz_dict_exists(uint16_t id) {
+    const mcz_table_t *table = mcz_current_table();
+    if(!table) return NULL;
+    const mcz_dict_meta_t *meta = mcz_lookup_by_id(table, id);
+    return meta? true: false;
+}
+
 /* -----------------------------------------------------------------
  * Compress an value.
  *  • On success: returns compressed size (≥0) and sets *dict_id_out.

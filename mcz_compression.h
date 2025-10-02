@@ -143,4 +143,6 @@ int mcz_get_stats_snapshot(mcz_stats_snapshot_t *snap, const char *ns, size_t ns
 
 const char ** mcz_list_namespaces(size_t *count);
 
+bool mcz_dict_exists(uint16_t id);
+
 #endif /* MCZ_COMPRESSION_H */
