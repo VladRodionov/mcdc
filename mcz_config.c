@@ -332,7 +332,7 @@ int parse_mcz_config(const char *path)
     return rc;      /* 0 if perfect, first fatal errno otherwise */
     
 err: // set compression to disabled
-    fprintf(stderr, "mcz: compression disabled due to an error in the configuration file\n")
+    fprintf(stderr, "mcz: compression disabled due to an error in the configuration file\n");
     settings.mcz_enable_comp = false;
     settings.mcz_enable_dict = false;
     return rc;

@@ -429,7 +429,7 @@ static void* trainer_main(void *arg) {
             }
             if (stats) atomic_inc64(&stats->trainer_errs, 1);
         } else {
-            if (settings.verbose > 0) {
+            if (settings.verbose > 1) {
                 log_rate_limited(1000000ULL,
                     "mcz-dict: new dict (%zu B) built from %zu samples\n", dict_sz, count);
             }
