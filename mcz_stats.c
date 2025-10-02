@@ -142,6 +142,7 @@ static void mcz_stats_registry_destroy(mcz_stats_registry_t *r) {
     table_free(t, /*free_stats=*/1);
 }
 
+
 /* Sum per-namespace counters into the global block.
    Returns 0 on success, -ENOENT if the registry/table is unavailable. */
 static int mcz_stats_sync_global(void)
@@ -185,7 +186,20 @@ static int mcz_stats_sync_global(void)
             skipped_comp_incomp  += atomic_load_explicit(&st->skipped_comp_incomp,   memory_order_relaxed);
         }
     }
+    /* add default */
+    mcz_stats_atomic_t *st = atomic_load_explicit(&r->default_stats, memory_order_acquire);
+    bytes_raw_total += atomic_load_explicit(&st->bytes_raw_total,  memory_order_relaxed);
+    bytes_cmp_total += atomic_load_explicit(&st->bytes_cmp_total,  memory_order_relaxed);
+    writes_total    += atomic_load_explicit(&st->writes_total,  memory_order_relaxed);
+    reads_total     += atomic_load_explicit(&st->reads_total,  memory_order_relaxed);
 
+    compress_errs   += atomic_load_explicit(&st->compress_errs,    memory_order_relaxed);
+    decompress_errs += atomic_load_explicit(&st->decompress_errs,  memory_order_relaxed);
+    dict_miss_errs  += atomic_load_explicit(&st->dict_miss_errs,   memory_order_relaxed);
+    skipped_comp_min_size   += atomic_load_explicit(&st->skipped_comp_min_size,    memory_order_relaxed);
+    skipped_comp_max_size += atomic_load_explicit(&st->skipped_comp_max_size,  memory_order_relaxed);
+    skipped_comp_incomp  += atomic_load_explicit(&st->skipped_comp_incomp,   memory_order_relaxed);
+    
     /* Release the snapshot */
     atomic_fetch_sub_explicit(&t->refcnt, 1, memory_order_acq_rel);
 
