@@ -280,8 +280,8 @@ static void settings_init(void) {
 #endif
 #ifdef USE_ZSTD
     //TODO: move defaults to mcz_config.h
-    settings.mcz_enable_comp = true;
-    settings.mcz_enable_dict = true;
+    settings.mcz_enable_comp = false;
+    settings.mcz_enable_dict = false;
     settings.mcz_dict_dir = NULL;
     settings.mcz_dict_size = 256*1024;
     settings.zstd_level = 3;

@@ -204,7 +204,8 @@ int parse_mcz_config(const char *path)
             settings.mcz_max_size = (size_t)v;
 
         } else if (strcasecmp(key, "dict_dir_path") == 0 || strcasecmp(key, "mcz.dict_dir") == 0) {
-            free(settings.mcz_dict_dir); settings.mcz_dict_dir = val && *val ? strdup(val) : NULL;
+            free(settings.mcz_dict_dir);
+            settings.mcz_dict_dir = val && *val ? strdup(val) : NULL;
             if (!strcasecmp(key,"dict_dir_path")) fprintf(stderr, "%s:%d: NOTE: 'dict_dir_path' is deprecated; use 'mcz.dict_dir'\n", path, ln);
 
         } else if (strcasecmp(key, "disable_dict") == 0 || strcasecmp(key, "mcz.enable_dict") == 0) {
@@ -312,16 +313,29 @@ int parse_mcz_config(const char *path)
             /* not fatal; continue */
         }
     }
-    /* basic sanity checks */
-    if (settings.mcz_min_size > settings.mcz_max_size) {
-        fprintf(stderr, "mcz: min_size > max_size\n"); rc = rc?rc:-EINVAL;
-    }
-    if (settings.mcz_enable_sampling && (settings.mcz_sample_p <= 0.0 || settings.mcz_sample_p > 1.0)) {
-        fprintf(stderr, "mcz: sample_p must be in (0,1]\n"); rc = rc?rc:-ERANGE;
-    }
     free(line);
     fclose(fp);
+    /* basic sanity checks */
+    if (settings.mcz_min_size > settings.mcz_max_size) {
+        fprintf(stderr, "mcz: min_size > max_size\n"); rc = rc?rc:-EINVAL; goto err;
+    }
+    if (settings.mcz_enable_sampling && (settings.mcz_sample_p <= 0.0 || settings.mcz_sample_p > 1.0)) {
+        fprintf(stderr, "mcz: sample_p must be in (0,1]\n"); rc = rc?rc:-ERANGE; goto err;
+    }
+    if (settings.mcz_dict_dir == NULL && settings.mcz_enable_comp && settings.mcz_enable_dict){
+        fprintf(stderr, "mcz: dictionary directory is not specified\n"); rc = rc?rc:-EINVAL; goto err;
+    }
+    if (settings.mcz_spool_dir == NULL && settings.mcz_enable_comp && settings.mcz_enable_dict){
+        fprintf(stderr, "mcz: spoll directory is not specified\n"); rc = rc?rc:-EINVAL; goto err;
+    }
+
     return rc;      /* 0 if perfect, first fatal errno otherwise */
+    
+err: // set compression to disabled
+    fprintf(stderr, "mcz: compression disabled due to an error in the configuration file\n")
+    settings.mcz_enable_comp = false;
+    settings.mcz_enable_dict = false;
+    return rc;
 }
 
 static const char *train_mode_to_str(mcz_train_mode_t mode) {
