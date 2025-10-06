@@ -127,6 +127,10 @@ ssize_t mcz_orig_size(const void *src, size_t comp_size);
  */
 ssize_t mcz_maybe_decompress(const item *it, mc_resp    *resp);
 
+void mcz_report_dict_miss_err(const char *key, size_t klen);
+
+void mcz_report_decomp_err(const char *key, size_t klen);
+
 const mcz_ctx_t *mcz_ctx(void);
 mcz_ctx_t       *mcz_ctx_mut(void);
 

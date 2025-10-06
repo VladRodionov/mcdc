@@ -84,13 +84,6 @@ enum {
     ZSTD_VALUE_MIN = 16        /* absolute min size of a value for compression */
 };
 
-#ifdef EXTSTORE
-extern void *ext_storage;  // defined in memcached.c
-static inline bool extstore_enabled_global(void) {
-    return ext_storage != NULL;
-}
-#endif
-
 static int mcz_cfg_init(void)
 {
     mcz_cfg_t *cfg =  mcz_config_get();
@@ -123,19 +116,6 @@ static int mcz_cfg_init(void)
             cfg->max_comp_size = ZSTD_VALUE_MAX;
         }
     }
-#ifdef EXTSTORE
-    if (extstore_enabled_global() && cfg->max_comp_size >= settings.ext_item_size - 3){
-        cfg->max_comp_size = settings.ext_item_size - 3;
-    }
-    if (cfg->min_comp_size >= cfg->max_comp_size){
-        cfg->enable_comp = false;
-        if (settings.verbose > 1) {
-            fprintf(stderr,
-                    "Disable zstd min/max comp size mismatch (%zu / %zu)\n",
-                    cfg->min_comp_size, cfg->max_comp_size);
-        }
-    }
-#else
     if (cfg->min_comp_size > cfg->max_comp_size ||
         cfg->max_comp_size > ZSTD_VALUE_MAX) {
         if (settings.verbose > 1) {
@@ -145,7 +125,6 @@ static int mcz_cfg_init(void)
         }
         return -EINVAL;
     }
-#endif
     return 0;
 }
 
@@ -666,6 +645,28 @@ bool mcz_dict_exists(uint16_t id) {
     return meta? true: false;
 }
 
+void mcz_report_dict_miss_err(const char *key, size_t klen) {
+    mcz_ctx_t *ctx = mcz_ctx_mut();          /* global-static instance */
+    if (!ctx->cfg->enable_comp){
+        return;
+    }
+    mcz_stats_atomic_t * stats = mcz_stats_lookup_by_key((const char *) key, klen);
+    if(stats) {
+        atomic_inc64(&stats->dict_miss_errs, 1);
+    }
+}
+
+void mcz_report_decomp_err(const char *key, size_t klen) {
+    mcz_ctx_t *ctx = mcz_ctx_mut();          /* global-static instance */
+    if (!ctx->cfg->enable_comp){
+        return;
+    }
+    mcz_stats_atomic_t * stats = mcz_stats_lookup_by_key((const char *) key, klen);
+    if(stats) {
+        atomic_inc64(&stats->decompress_errs, 1);
+    }
+}
+
 /* -----------------------------------------------------------------
  * Compress an value.
  *  • On success: returns compressed size (≥0) and sets *dict_id_out.
@@ -809,21 +810,21 @@ ssize_t mcz_maybe_decompress(const item *it, mc_resp    *resp) {
         return -EINVAL;                  /* unknown dict id */
     }
 
-     /* 3. Prepare destination buffer ------------------------------ */
-     const void *src     = ITEM_data(it);
-     size_t      compLen = it->nbytes;
+    /* 3. Prepare destination buffer ------------------------------ */
+    const void *src     = ITEM_data(it);
+    size_t      compLen = it->nbytes;
 
-     size_t expect = ZSTD_getFrameContentSize(src, compLen);
+    size_t expect = ZSTD_getFrameContentSize(src, compLen);
     if (expect == ZSTD_CONTENTSIZE_ERROR){
         fprintf(stderr, "[mcz] decompress: corrupt frame (tid=%llu, id=%u, compLen=%zu, start=%llu)\n",
                cur_tid(), did, compLen, *(uint64_t *)src);
         if(stats) atomic_inc64(&stats->decompress_errs, 1);
         return -EINVAL;
     }
-     if (expect == ZSTD_CONTENTSIZE_UNKNOWN)
-         expect = compLen * 4u;           /* pessimistic */
+    if (expect == ZSTD_CONTENTSIZE_UNKNOWN)
+        expect = compLen * 4u;           /* pessimistic */
 
-     void *dst = malloc(expect);
+    void *dst = malloc(expect);
     if (!dst){
         fprintf(stderr,"[mcz] decompress: malloc(%zu) failed: %s\n",
                 expect, strerror(errno));
@@ -832,20 +833,20 @@ ssize_t mcz_maybe_decompress(const item *it, mc_resp    *resp) {
         return -ENOMEM;
     }
 
-     /* 4. Decompress ---------------------------------------------- */
-     ssize_t dec = mcz_decompress(src, compLen, dst, expect, did);
+    /* 4. Decompress ---------------------------------------------- */
+    ssize_t dec = mcz_decompress(src, compLen, dst, expect, did);
 
-     if (dec < 0) {                       /* ZSTD error */
-         fprintf(stderr, "[mcz decompress: mcz_decompress() -> %zd (id=%u)\n",
+    if (dec < 0) {                       /* ZSTD error */
+        fprintf(stderr, "[mcz decompress: mcz_decompress() -> %zd (id=%u)\n",
                 dec, did);
-         free(dst);
-         if(stats) atomic_inc64(&stats->decompress_errs, 1);
-         return dec;
-     }
+        free(dst);
+        if(stats) atomic_inc64(&stats->decompress_errs, 1);
+        return dec;
+    }
 
-     /* 5. Hand buffer to network layer ---------------------------- */
-     resp->write_and_free = dst;
-     return dec;                          /* decompressed bytes */
+    /* 5. Hand buffer to network layer ---------------------------- */
+    resp->write_and_free = dst;
+    return dec;                          /* decompressed bytes */
 }
 
 

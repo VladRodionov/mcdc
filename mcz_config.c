@@ -150,32 +150,31 @@ static void rtrim(char *s)
 }
 
 static void init_default(void) {
-    //TODO: move defaults to mcz_config.h
-    g_cfg.enable_comp = false;
-    g_cfg.enable_dict = false;
-    g_cfg.dict_dir = NULL;
-    g_cfg.dict_size = 256*1024;
-    g_cfg.zstd_level = 3;
-    g_cfg.min_comp_size = 32;
-    g_cfg.max_comp_size = 100*1024;
+    g_cfg.enable_comp           = MCZ_DEFAULT_ENABLE_COMP;
+    g_cfg.enable_dict           = MCZ_DEFAULT_ENABLE_DICT;
+    g_cfg.dict_dir              = MCZ_DEFAULT_DICT_DIR;
+    g_cfg.dict_size             = MCZ_DEFAULT_DICT_SIZE;
+    g_cfg.zstd_level            = MCZ_DEFAULT_ZSTD_LEVEL;
+    g_cfg.min_comp_size         = MCZ_DEFAULT_MIN_COMP_SIZE;
+    g_cfg.max_comp_size         = MCZ_DEFAULT_MAX_COMP_SIZE;
 
-    g_cfg.enable_training = true;
-    g_cfg.retraining_interval_s = 2*60*60;
-    g_cfg.min_training_size = 0;
-    g_cfg.ewma_alpha = 0.05;
-    g_cfg.retrain_drop = 0.1;
-    g_cfg.train_mode = MCZ_TRAIN_FAST;
-    
-    g_cfg.gc_cool_period = 3600;
-    g_cfg.gc_quarantine_period = 3600 * 24 * 7;
+    g_cfg.enable_training       = MCZ_DEFAULT_ENABLE_TRAINING;
+    g_cfg.retraining_interval_s = MCZ_DEFAULT_RETRAIN_INTERVAL_S;
+    g_cfg.min_training_size     = MCZ_DEFAULT_MIN_TRAINING_SIZE;
+    g_cfg.ewma_alpha            = MCZ_DEFAULT_EWMA_ALPHA;
+    g_cfg.retrain_drop          = MCZ_DEFAULT_RETRAIN_DROP;
+    g_cfg.train_mode            = MCZ_DEFAULT_TRAIN_MODE;
 
-    g_cfg.dict_retain_max = 10;
+    g_cfg.gc_cool_period        = MCZ_DEFAULT_GC_COOL_PERIOD;
+    g_cfg.gc_quarantine_period  = MCZ_DEFAULT_GC_QUARANTINE_PERIOD;
 
-    g_cfg.enable_sampling = true;
-    g_cfg.sample_p = 0.02;
-    g_cfg.spool_dir = NULL;
-    g_cfg.spool_max_bytes = 64*1024*1024;
-    g_cfg.compress_keys = false;
+    g_cfg.dict_retain_max       = MCZ_DEFAULT_DICT_RETAIN_MAX;
+
+    g_cfg.enable_sampling       = MCZ_DEFAULT_ENABLE_SAMPLING;
+    g_cfg.sample_p              = MCZ_DEFAULT_SAMPLE_P;
+    g_cfg.spool_dir             = MCZ_DEFAULT_SPOOL_DIR;
+    g_cfg.spool_max_bytes       = MCZ_DEFAULT_SPOOL_MAX_BYTES;
+    g_cfg.compress_keys         = MCZ_DEFAULT_COMPRESS_KEYS;
 }
 
 /*-------------------------------------------------------------------------*/

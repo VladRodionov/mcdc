@@ -11,6 +11,12 @@
 #include <limits.h>
 #include <ctype.h>
 
+#ifdef USE_ZSTD
+#include <zstd.h>
+#include "mcz_compression.h"
+#include "mcz_utils.h"
+#endif
+
 #define PAGE_BUCKET_DEFAULT 0
 #define PAGE_BUCKET_COMPACT 1
 #define PAGE_BUCKET_CHUNKED 2
@@ -140,6 +146,41 @@ void storage_stats(ADD_STAT add_stats, void *c) {
 
 }
 
+#ifdef USE_ZSTD
+static int replace_value_size_inplace(char *line, size_t new_size) {
+    if (!line) return -1;
+
+    // Find last space before size
+    char *last_space = strrchr(line, ' ');
+    if (!last_space) return -1;
+
+    // Overwrite from last_space+1 up to CRLF
+    char *crlf = strstr(last_space, "\r\n");
+    if (!crlf) return -1;
+
+    int written = snprintf(last_space + 1,
+                           (size_t)(1024 - (last_space - line) - 1),
+                           "%zu\r\n", new_size);
+    if (written < 0) return -1;
+
+    return 0;
+}
+
+
+static inline int num_len(size_t n) {
+    int len = (n <= 0) ? 1 : 0;   // '0' has length 1, negatives add '-'
+    while (n != 0) {
+        n /= 10;
+        len++;
+    }
+    return len;
+}
+
+static inline int num_len_diff(size_t n1, size_t n2){
+    return num_len(n1) - num_len(n2);
+}
+#endif
+
 // This callback runs in the IO thread.
 // TODO: Some or all of this should move to the
 // io_pending's callback back in the worker thread.
@@ -178,7 +219,74 @@ static void _storage_get_item_cb(void *e, obj_io *io, int ret) {
             p->badcrc = true;
         }
     }
+#ifdef USE_ZSTD
+    bool comp = ITEM_is_zstd(read_it);
+    bool bin_proto = c->protocol == binary_prot;
+    if (comp) {
+        uint16_t did = ITEM_get_dictid(read_it);
+        /* Get decompressed size */
+        const void *src     = ITEM_data(read_it);
+        size_t      compLen = read_it->nbytes;
+        size_t expect = ZSTD_getFrameContentSize(src, compLen);
+        if (expect == ZSTD_CONTENTSIZE_ERROR || expect == ZSTD_CONTENTSIZE_UNKNOWN){
+            fprintf(stderr, "[mcz] decompress: corrupt frame (id=%u, compLen=%zu, start=%llu)\n",
+                    did, compLen, *(uint64_t *)src);
+            mcz_report_decomp_err(ITEM_key(read_it), read_it->nkey);
+            miss = true;
+        }
+        
+        /* we need to allocate new item*/
+        if (!miss){
+            size_t ntotal = ITEM_ntotal(read_it);
+            /* adjust to a new size*/
+            ntotal += expect - compLen;
+            unsigned int clsid = slabs_clsid(ntotal);
+            item *new_it = do_item_alloc_pull(ntotal, clsid);
+            if (new_it == NULL) {
+                //TODO: ?
+                miss = true;
+                pthread_mutex_lock(&c->thread->stats.mutex);
+                c->thread->stats.get_oom_extstore++;
+                pthread_mutex_unlock(&c->thread->stats.mutex);
+            } else {
+                /* copy original header (including client flags)*/
+                int total = ITEM_ntotal(read_it) - read_it->nbytes;
+                memcpy((char *)new_it + STORE_OFFSET, (char *)read_it + STORE_OFFSET, total - STORE_OFFSET);
+                new_it->slabs_clsid = clsid;
+                new_it->nbytes = expect;
+                /* decompress into new_it */
+                ssize_t dsz = mcz_decompress(src, compLen, ITEM_data(new_it), ntotal, did);
+                if (dsz <= 0) {
+                    miss = true;
+                    if (dsz == -EINVAL){
+                        mcz_report_dict_miss_err(ITEM_key(read_it), read_it->nkey);
+                    } else {
+                        mcz_report_decomp_err(ITEM_key(read_it), read_it->nkey);
+                    }
+                } else {
+                    int off = bin_proto? 2: 0; // value has \r\n at the end which is not needed in binary
+                    io->decomp_buf = (char *) new_it;
+                    read_it = new_it;
 
+                    if (!bin_proto) {
+                        replace_value_size_inplace(resp->wbuf, expect - off);
+                    } else {
+                        protocol_binary_response_header *header =
+                            (protocol_binary_response_header *)resp->wbuf;
+                        uint32_t body_len = ntohl(header->response.bodylen);
+                        body_len += expect - compLen;
+                        header->response.bodylen = htonl(body_len);
+                    }
+                    p->io_ctx.len = ntotal;
+                    
+                    resp->iov[p->iovec_data].iov_len = expect - off;
+                    resp->tosend += (expect - compLen);
+                    if (!bin_proto) resp->tosend += num_len_diff(expect, compLen);
+                }
+            }
+        }
+    }
+#endif
     if (miss) {
         if (p->noreply) {
             // In all GET cases, noreply means we send nothing back.
@@ -237,6 +345,7 @@ static void _storage_get_item_cb(void *e, obj_io *io, int ret) {
         assert(read_it->slabs_clsid != 0);
         // TODO: should always use it instead of ITEM_data to kill more
         // chunked special casing.
+
         if ((read_it->it_flags & ITEM_CHUNKED) == 0) {
             resp->iov[p->iovec_data].iov_base = ITEM_data(read_it);
         }
@@ -466,6 +575,13 @@ static void recache_or_free(io_pending_t *pending) {
     }
     if (do_free)
         slabs_free(it, ITEM_clsid(it));
+#ifdef USE_ZSTD
+    if (io->decomp_buf){
+        item *dit = (item *) io->decomp_buf;
+        slabs_free(dit, ITEM_clsid(dit));
+        io->decomp_buf = NULL;
+    }
+#endif
 
     p->io_ctx.buf = NULL;
     p->io_ctx.next = NULL;

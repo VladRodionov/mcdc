@@ -30,6 +30,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+
+
 /* --------------------------------------------------------------------
  * User-tunable parameters for the zstd integration
  * (keep in sync with mcz_compression.h)
@@ -73,6 +75,36 @@ typedef struct {
     char    *spool_dir;             // path
     size_t   spool_max_bytes;       // cap; drop-oldest windows
 } mcz_cfg_t;
+
+
+/* Default config values for MCZ */
+
+#define MCZ_DEFAULT_ENABLE_COMP            false
+#define MCZ_DEFAULT_ENABLE_DICT            false
+#define MCZ_DEFAULT_DICT_DIR               NULL
+#define MCZ_DEFAULT_DICT_SIZE              (256 * 1024)
+#define MCZ_DEFAULT_ZSTD_LEVEL             3
+#define MCZ_DEFAULT_MIN_COMP_SIZE          32
+#define MCZ_DEFAULT_MAX_COMP_SIZE          (100 * 1024)
+
+#define MCZ_DEFAULT_ENABLE_TRAINING        true
+#define MCZ_DEFAULT_RETRAIN_INTERVAL_S     (2 * 60 * 60)
+#define MCZ_DEFAULT_MIN_TRAINING_SIZE      0
+#define MCZ_DEFAULT_EWMA_ALPHA             0.05
+#define MCZ_DEFAULT_RETRAIN_DROP           0.1
+#define MCZ_DEFAULT_TRAIN_MODE             MCZ_TRAIN_FAST
+
+#define MCZ_DEFAULT_GC_COOL_PERIOD         3600
+#define MCZ_DEFAULT_GC_QUARANTINE_PERIOD   (3600 * 24 * 7)
+
+#define MCZ_DEFAULT_DICT_RETAIN_MAX        10
+
+#define MCZ_DEFAULT_ENABLE_SAMPLING        true
+#define MCZ_DEFAULT_SAMPLE_P               0.02
+#define MCZ_DEFAULT_SPOOL_DIR              NULL
+#define MCZ_DEFAULT_SPOOL_MAX_BYTES        (64 * 1024 * 1024)
+
+#define MCZ_DEFAULT_COMPRESS_KEYS          false
 
 /* --------------------------------------------------------------------
  * parse_mcz_config()

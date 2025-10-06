@@ -551,7 +551,6 @@ void do_item_remove(item *it) {
     MEMCACHED_ITEM_REMOVE(ITEM_key(it), it->nkey, it->nbytes);
     assert((it->it_flags & ITEM_SLABBED) == 0);
     assert(it->refcount > 0);
-
     if (refcount_decr(it) == 0) {
         item_free(it);
     }
@@ -1040,7 +1039,7 @@ item *do_item_get(const char *key, const size_t nkey, const uint32_t hv, LIBEVEN
                     STORAGE_delete(t->storage, it);
                     do_item_remove(it);
                     it = NULL;
-                    
+                    mcz_report_dict_miss_err(ITEM_key(it), it->nkey);
                     if (settings.verbose > 2) {
                         fprintf(stderr, " -nuked by missing dictionary error");
                     }
