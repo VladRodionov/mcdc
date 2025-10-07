@@ -79,8 +79,8 @@ typedef struct {
 
 /* Default config values for MCZ */
 
-#define MCZ_DEFAULT_ENABLE_COMP            false
-#define MCZ_DEFAULT_ENABLE_DICT            false
+#define MCZ_DEFAULT_ENABLE_COMP            true
+#define MCZ_DEFAULT_ENABLE_DICT            true
 #define MCZ_DEFAULT_DICT_DIR               NULL
 #define MCZ_DEFAULT_DICT_SIZE              (256 * 1024)
 #define MCZ_DEFAULT_ZSTD_LEVEL             3
@@ -126,4 +126,7 @@ void mcz_config_print(const mcz_cfg_t *cfg);
 
 mcz_cfg_t * mcz_config_get(void);
 
+void mcz_init_default_config(void);
+
+int mcz_config_sanity_check(void);
 #endif /* MCZ_CONFIG_H */

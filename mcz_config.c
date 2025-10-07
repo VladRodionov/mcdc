@@ -41,6 +41,8 @@
 
 static mcz_cfg_t g_cfg = {0};
 
+static bool inited = false;
+
 mcz_cfg_t * mcz_config_get(void) {
     return &g_cfg;
 }
@@ -149,7 +151,8 @@ static void rtrim(char *s)
         *p = '\0';
 }
 
-static void init_default(void) {
+void mcz_init_default_config(void) {
+    if(inited) return;
     g_cfg.enable_comp           = MCZ_DEFAULT_ENABLE_COMP;
     g_cfg.enable_dict           = MCZ_DEFAULT_ENABLE_DICT;
     g_cfg.dict_dir              = MCZ_DEFAULT_DICT_DIR;
@@ -175,12 +178,61 @@ static void init_default(void) {
     g_cfg.spool_dir             = MCZ_DEFAULT_SPOOL_DIR;
     g_cfg.spool_max_bytes       = MCZ_DEFAULT_SPOOL_MAX_BYTES;
     g_cfg.compress_keys         = MCZ_DEFAULT_COMPRESS_KEYS;
+    inited = true;
 }
+
+static const char *train_mode_to_str(mcz_train_mode_t mode) {
+    switch (mode) {
+        case MCZ_TRAIN_FAST:     return "FAST";
+        case MCZ_TRAIN_OPTIMIZE: return "OPTIMIZE";
+        default:                 return "UNKNOWN";
+    }
+}
+
+static inline bool strnull_or_empty(const char *s) {
+    return (s == NULL) || (s[0] == '\0');
+}
+
+/**
+ * Sanity check configuration.
+ * If mandatory parameters are missing:
+ *   - disables compression and dictionary (sets enable_comp/enable_dict = false).
+ * Returns 0 if OK, -1 if degraded (sanity failure).
+ */
+int mcz_config_sanity_check(void) {
+    mcz_cfg_t *cfg = &g_cfg;
+    if (!cfg) return -1;
+
+    if (!cfg->enable_comp) return 0;
+    bool ok = true;
+
+    // dict_dir must exist
+    if (strnull_or_empty(cfg->dict_dir)) {
+        fprintf(stderr, "[mcz] sanity check: dict_dir is missing\n");
+        ok = false;
+    }
+
+    // spool_dir required if sampling enabled
+    if (cfg->enable_sampling && strnull_or_empty(cfg->spool_dir)) {
+        fprintf(stderr, "[mcz] sanity check: sampling enabled but spool_dir is missing\n");
+        ok = false;
+    }
+
+    if (!ok) {
+        cfg->enable_dict = false;
+        cfg->enable_training = false;
+        fprintf(stderr, "[mcz] sanity check: dictionary compression is disabled\n");
+        return -1;
+    }
+
+    return 0;
+}
+
 
 /*-------------------------------------------------------------------------*/
 int parse_mcz_config(const char *path)
 {
-    init_default();
+    mcz_init_default_config();
     FILE *fp = fopen(path, "r");
     if (!fp) {
         fprintf(stderr, "zstd: cannot open %s: %s\n", path, strerror(errno));
@@ -314,20 +366,11 @@ int parse_mcz_config(const char *path)
     }
 
     return rc;      /* 0 if perfect, first fatal errno otherwise */
-    
 err: // set compression to disabled
     fprintf(stderr, "mcz: compression disabled due to an error in the configuration file\n");
     g_cfg.enable_comp = false;
     g_cfg.enable_dict = false;
     return rc;
-}
-
-static const char *train_mode_to_str(mcz_train_mode_t mode) {
-    switch (mode) {
-        case MCZ_TRAIN_FAST:     return "FAST";
-        case MCZ_TRAIN_OPTIMIZE: return "OPTIMIZE";
-        default:                 return "UNKNOWN";
-    }
 }
 
 void mcz_config_print(const mcz_cfg_t *cfg) {

@@ -84,12 +84,14 @@ enum {
     ZSTD_VALUE_MIN = 16        /* absolute min size of a value for compression */
 };
 
-static int mcz_cfg_init(void)
+static int attach_cfg(void)
 {
     mcz_cfg_t *cfg =  mcz_config_get();
     mcz_ctx_t *ctx = mcz_ctx_mut();
     ctx->cfg = cfg;
-    
+    if (!cfg->enable_comp) {
+        return -EINVAL;
+    }
     /* 1. Compression level ---------------------------------------- */
     int lvl = cfg->zstd_level;          /* e.g. from -Zl <n> CL arg */
     if (lvl == 0)                           /* 0 = default (3) */
@@ -433,7 +435,10 @@ static int mcz_start_trainer(mcz_ctx_t *ctx){
 
 /* ---------- public init / destroy ----------------------------------- */
 int mcz_init(void) {
-    mcz_cfg_init();
+    mcz_init_default_config();
+    mcz_config_sanity_check();
+    attach_cfg();
+    
     mcz_ctx_t *ctx = mcz_ctx_mut();
     if (!ctx)
         return -ENOMEM;
@@ -446,11 +451,13 @@ int mcz_init(void) {
     atomic_init(&ctx->bytes_pending, 0);
     ctx->trainer_tid = (pthread_t ) { 0 }; /* will be set by trainer thread */
 
+    /* ---------------- init statistics module ----------------------------*/
+    mcz_stats_registry_global_init(0);
+    
     if (!cfg->enable_dict) {
         return 0;
     }
-    /* ---------------- init statistics module ----------------------------*/
-    mcz_stats_registry_global_init(0);
+ 
     /* try external dictionary first */
     mcz_load_dicts();
 
