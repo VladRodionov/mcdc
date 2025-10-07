@@ -410,7 +410,6 @@ void mcz_config_print(const mcz_cfg_t *cfg) {
     printf("enable_sampling    : %s\n", cfg->enable_sampling ? "true" : "false");
     printf("sample_p           : %.3f\n", cfg->sample_p);
     printf("sample_window_sec  : %d\n", cfg->sample_window_sec);
-    printf("sample_roll_bytes  : %zu\n", cfg->sample_roll_bytes);
     printf("spool_dir          : %s\n", cfg->spool_dir ? cfg->spool_dir : "(null)");
     printf("spool_max_bytes    : %zu\n", cfg->spool_max_bytes);
 

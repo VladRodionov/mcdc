@@ -267,7 +267,6 @@ static int build_cfg_ascii(char **outp, size_t *lenp) {
     APP("CFG enable_sampling %s\r\n", b2s(c->enable_sampling));
     APP("CFG sample_p %.6f\r\n", c->sample_p);
     APP("CFG sample_window_sec %d\r\n", c->sample_window_sec);
-    APP("CFG sample_roll_bytes %zu\r\n", c->sample_roll_bytes);
     APP("CFG spool_dir %s\r\n", c->spool_dir ? c->spool_dir : "");
     APP("CFG spool_max_bytes %zu\r\n", c->spool_max_bytes);
 
@@ -319,7 +318,6 @@ static int build_cfg_json(char **outp, size_t *lenp) {
         "\"enable_sampling\":%s,\r\n"
         "\"sample_p\":%.6f,\r\n"
         "\"sample_window_sec\":%d,\r\n"
-        "\"sample_roll_bytes\":%zu,\r\n"
         "\"spool_dir\":\"%s\",\r\n"
         "\"spool_max_bytes\":%zu\r\n"
         "}\r\n",
@@ -346,7 +344,6 @@ static int build_cfg_json(char **outp, size_t *lenp) {
         b2s(c->enable_sampling),
         c->sample_p,
         c->sample_window_sec,
-        c->sample_roll_bytes,
         spool_dir,
         c->spool_max_bytes
     );

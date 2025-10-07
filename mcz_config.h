@@ -63,7 +63,7 @@ typedef struct {
     
     // GC
     int32_t gc_cool_period;         // default, 1h - time to keep retired dictionary data in memory
-    int32_t gc_quarantine_period;    // default: 7d, time to keep retired dictionary in a file system
+    int32_t gc_quarantine_period;   // default: 7d, time to keep retired dictionary in a file system
     // Retention
     int      dict_retain_max;       // cap count of resident old dicts
 
@@ -71,7 +71,6 @@ typedef struct {
     bool     enable_sampling;       // enable sample spooling
     double   sample_p;              // 0..1
     int      sample_window_sec;     // seconds
-    size_t   sample_roll_bytes;     // rotate when >=
     char    *spool_dir;             // path
     size_t   spool_max_bytes;       // cap; drop-oldest windows
 } mcz_cfg_t;
