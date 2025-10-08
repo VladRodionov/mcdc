@@ -70,7 +70,7 @@ typedef struct {
     // Sampling + Spool
     bool     enable_sampling;       // enable sample spooling
     double   sample_p;              // 0..1
-    int      sample_window_sec;     // seconds
+    int      sample_window_duration;// seconds
     char    *spool_dir;             // path
     size_t   spool_max_bytes;       // cap; drop-oldest windows
 } mcz_cfg_t;
@@ -100,6 +100,7 @@ typedef struct {
 
 #define MCZ_DEFAULT_ENABLE_SAMPLING        true
 #define MCZ_DEFAULT_SAMPLE_P               0.02
+#define MCZ_DEFAULT_SAMPLE_WINDOW_DURATION 0
 #define MCZ_DEFAULT_SPOOL_DIR              NULL
 #define MCZ_DEFAULT_SPOOL_MAX_BYTES        (64 * 1024 * 1024)
 

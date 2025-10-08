@@ -76,7 +76,8 @@ static inline full_sample_node_t *reverse_list(full_sample_node_t *h) {
 typedef struct {
     char   *spool_dir;        /* owned copy */
     double  sample_p;         /* 0..1 */
-    size_t  max_bytes;        /* file cap */
+    int sample_window_sec;
+    size_t  spool_max_bytes;        /* file cap */
 } sampler_cfg_t;
 
 static sampler_cfg_t g_cfg        = {0};
@@ -153,7 +154,7 @@ static int bufw_flush(bufw_t *w) {
         ssize_t n = write(w->fd, p, to_write);
         if (n < 0) {
             if (errno == EINTR) continue;
-            return -1;
+            return n;
         }
         p += (size_t)n;
         to_write -= (size_t)n;
@@ -201,7 +202,7 @@ static void free_list(full_sample_node_t *n) {
 
 static void *sampler_main(void *arg) {
     (void)arg;
-
+    
     /* Ensure directory exists (best-effort) */
     if (g_cfg.spool_dir && *g_cfg.spool_dir) {
         if (mkdir(g_cfg.spool_dir, 0777) != 0 && errno != EEXIST) {
@@ -209,10 +210,10 @@ static void *sampler_main(void *arg) {
             return NULL;
         }
     }
-
+    
     /* Open file */
-    time_t now = time(NULL);
-    if (make_path(g_path, sizeof(g_path), g_cfg.spool_dir, now) != 0) {
+    time_t start = time(NULL);
+    if (make_path(g_path, sizeof(g_path), g_cfg.spool_dir, start) != 0) {
         g_path[0] = '\0';
         atomic_store_explicit(&g_running, false, memory_order_release);
         return NULL;
@@ -223,7 +224,7 @@ static void *sampler_main(void *arg) {
         atomic_store_explicit(&g_running, false, memory_order_release);
         return NULL;
     }
-
+    
     /* Buffered writer */
     bufw_t bw;
     if (bufw_init(&bw, fd, 1u << 20) != 0) {
@@ -232,70 +233,47 @@ static void *sampler_main(void *arg) {
         atomic_store_explicit(&g_running, false, memory_order_release);
         return NULL;
     }
-
+    
     atomic_store_explicit(&g_written, 0, memory_order_release);
-
-    const size_t cap = g_cfg.max_bytes ? g_cfg.max_bytes : ((size_t)64 * 1024 * 1024);
+    
+    const size_t cap = g_cfg.spool_max_bytes ? g_cfg.spool_max_bytes : ((size_t)64 * 1024 * 1024);
     const struct timespec ts = { .tv_sec = 0, .tv_nsec = 10 * 1000 * 1000 }; /* 10ms */
-    full_sample_node_t *lst = NULL;
+    full_sample_node_t *lst = NULL, *cur = NULL;
+    
+    bool time_limit_enabled = g_cfg.sample_window_sec > 0;
     while (atomic_load_explicit(&g_running, memory_order_acquire)) {
+        cur = NULL; lst = NULL;
+        if (time_limit_enabled) {
+            time_t _now = time(NULL);
+            if ((int)difftime(_now, start) >= g_cfg.sample_window_sec) {
+                goto stop;
+            }
+        }
         lst = mpsc_drain();
         if (!lst) { nanosleep(&ts, NULL); continue; }
-
+        
         lst = reverse_list(lst);
-        for (full_sample_node_t *n = lst; n; ) {
-            if (n->klen <= UINT32_MAX && n->vlen <= UINT32_MAX) {
+        for (cur = lst; cur; ) {
+            if (cur->klen <= UINT32_MAX && cur->vlen <= UINT32_MAX) {
                 unsigned char hdr[8];
-                u32le((uint32_t)n->klen, hdr + 0);
-                u32le((uint32_t)n->vlen, hdr + 4);
-                if (bufw_write(&bw, hdr, 8) != 0) goto io_error;
-                if (n->klen && bufw_write(&bw, n->key, n->klen) != 0) goto io_error;
-                if (n->vlen && bufw_write(&bw, n->val, n->vlen) != 0) goto io_error;
-
-                size_t inc = 8 + n->klen + n->vlen;
+                u32le((uint32_t)cur->klen, hdr + 0);
+                u32le((uint32_t)cur->vlen, hdr + 4);
+                if (bufw_write(&bw, hdr, 8) != 0) {
+                    goto io_error;
+                }
+                if (cur->klen && bufw_write(&bw, cur->key, cur->klen) != 0) {
+                    goto io_error;
+                }
+                if (cur->vlen && bufw_write(&bw, cur->val, cur->vlen) != 0) {
+                    goto io_error;
+                }
+                
+                size_t inc = 8 + cur->klen + cur->vlen;
                 size_t total = atomic_fetch_add_explicit(&g_written, inc, memory_order_acq_rel) + inc;
                 if (total >= cap) {
-                    (void)bufw_flush(&bw);
-                    bufw_destroy(&bw);
-                    close(fd); fd = -1;
-
-                    /* auto-stop */
-                    atomic_store_explicit(&g_collected, 0, memory_order_release);
-                    atomic_store_explicit(&g_running, false, memory_order_release);
-
-                    /* free remaining nodes incl. current */
-                    while (n) { full_sample_node_t *nx = n->next;
-                        if (n->key) free(n->key);
-                        if (n->val) free(n->val);
-                        free(n); n = nx;
-                    }
-                    return NULL;
+                    goto stop;
                 }
             }
-            full_sample_node_t *nx = n->next;
-            if (n->key) free(n->key);
-            if (n->val) free(n->val);
-            free(n);
-            n = nx;
-        }
-    }
-
-    (void)bufw_flush(&bw);
-    bufw_destroy(&bw);
-    if (fd >= 0) { close(fd); fd = -1; }
-    return NULL;
-
-io_error:
-    (void)bufw_flush(&bw);
-    bufw_destroy(&bw);
-    if (fd >= 0) { close(fd); fd = -1; }
-    
-    atomic_store_explicit(&g_collected, 0, memory_order_release);
-    atomic_store_explicit(&g_running, false, memory_order_release);
-    /* free leftovers from current batch */
-    {
-        full_sample_node_t *cur = lst;
-        while (cur) {
             full_sample_node_t *nx = cur->next;
             if (cur->key) free(cur->key);
             if (cur->val) free(cur->val);
@@ -303,17 +281,42 @@ io_error:
             cur = nx;
         }
     }
+    
+    (void)bufw_flush(&bw);
+    bufw_destroy(&bw);
+    if (fd >= 0) { close(fd); fd = -1; }
+    return NULL;
 
+
+io_error:
+    perror("mcz:sampler write");
+stop:
+    (void)bufw_flush(&bw);
+    bufw_destroy(&bw);
+    if (fd >= 0) { close(fd); fd = -1; }
+    
+    atomic_store_explicit(&g_collected, 0, memory_order_release);
+    atomic_store_explicit(&g_running, false, memory_order_release);
+    /* free leftovers from current batch */
+    while (cur) {
+        full_sample_node_t *nx = cur->next;
+        if (cur->key) free(cur->key);
+        if (cur->val) free(cur->val);
+        free(cur);
+        cur = nx;
+    }
     return NULL;
 }
 /* ---------------------- Public API ---------------------- */
 
 int mcz_sampler_init(const char *spool_dir,
                      double sample_p,
+                     int sample_window_sec,
                      size_t spool_max_bytes) {
     g_cfg.spool_dir = (char *) spool_dir;
     g_cfg.sample_p = sample_p;
-    g_cfg.max_bytes = spool_max_bytes;
+    g_cfg.spool_max_bytes = spool_max_bytes;
+    g_cfg.sample_window_sec = sample_window_sec;
     atomic_store_explicit(&g_configured, true, memory_order_release);
     return 0;
 }
@@ -363,7 +366,7 @@ int mcz_sampler_maybe_record(const void *key, size_t klen,
     }
     size_t collected = atomic_load_explicit(&g_collected, memory_order_acquire);
     
-    if (collected >= g_cfg.max_bytes) {
+    if (collected >= g_cfg.spool_max_bytes) {
         return 0;
     }
     full_sample_node_t *n = (full_sample_node_t *)malloc(sizeof(*n));

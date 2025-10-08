@@ -175,6 +175,7 @@ void mcz_init_default_config(void) {
 
     g_cfg.enable_sampling       = MCZ_DEFAULT_ENABLE_SAMPLING;
     g_cfg.sample_p              = MCZ_DEFAULT_SAMPLE_P;
+    g_cfg.sample_window_duration     = MCZ_DEFAULT_SAMPLE_WINDOW_DURATION;
     g_cfg.spool_dir             = MCZ_DEFAULT_SPOOL_DIR;
     g_cfg.spool_max_bytes       = MCZ_DEFAULT_SPOOL_MAX_BYTES;
     g_cfg.compress_keys         = MCZ_DEFAULT_COMPRESS_KEYS;
@@ -336,6 +337,9 @@ int parse_mcz_config(const char *path)
         } else if (strcasecmp(key, "mcz.sample_p") == 0) {
             double d; if (parse_frac(val, &d)) { fprintf(stderr, "%s:%d: bad sample_p '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.sample_p = d;
+        } else if (strcasecmp(key, "mcz.sample_window_duration") == 0) {
+            int64_t s; if (parse_duration_sec(val, &s)) { fprintf(stderr, "%s:%d: bad sample_window_duration '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+            g_cfg.sample_window_duration = s;
         } else if (strcasecmp(key, "mcz.spool_dir") == 0) {
             g_cfg.spool_dir = val && *val ? strdup(val) : NULL;
         } else if (strcasecmp(key, "mcz.spool_max_bytes") == 0) {
@@ -392,26 +396,26 @@ void mcz_config_print(const mcz_cfg_t *cfg) {
     printf("compress_keys      : %s\n", cfg->compress_keys ? "true" : "false");
 
     // Training
-    printf("enable_training    : %s\n", cfg->enable_training ? "true" : "false");
-    printf("retraining_interval_s : %" PRId64 "\n", cfg->retraining_interval_s);
-    printf("min_training_size  : %zu\n", cfg->min_training_size);
-    printf("ewma_alpha         : %.3f\n", cfg->ewma_alpha);
-    printf("retrain_drop       : %.3f\n", cfg->retrain_drop);
-    printf("train_mode         : %s\n", train_mode_to_str(cfg->train_mode));
+    printf("enable_training         : %s\n", cfg->enable_training ? "true" : "false");
+    printf("retraining_interval_s   : %" PRId64 "\n", cfg->retraining_interval_s);
+    printf("min_training_size       : %zu\n", cfg->min_training_size);
+    printf("ewma_alpha              : %.3f\n", cfg->ewma_alpha);
+    printf("retrain_drop            : %.3f\n", cfg->retrain_drop);
+    printf("train_mode              : %s\n", train_mode_to_str(cfg->train_mode));
 
     // GC
-    printf("gc_cool_period     : %d\n", cfg->gc_cool_period);
-    printf("gc_quarantine_period : %d\n", cfg->gc_quarantine_period);
+    printf("gc_cool_period          : %d\n", cfg->gc_cool_period);
+    printf("gc_quarantine_period    : %d\n", cfg->gc_quarantine_period);
 
     // Retention
-    printf("dict_retain_max    : %d\n", cfg->dict_retain_max);
+    printf("dict_retain_max         : %d\n", cfg->dict_retain_max);
 
     // Sampling + Spool
-    printf("enable_sampling    : %s\n", cfg->enable_sampling ? "true" : "false");
-    printf("sample_p           : %.3f\n", cfg->sample_p);
-    printf("sample_window_sec  : %d\n", cfg->sample_window_sec);
-    printf("spool_dir          : %s\n", cfg->spool_dir ? cfg->spool_dir : "(null)");
-    printf("spool_max_bytes    : %zu\n", cfg->spool_max_bytes);
+    printf("enable_sampling         : %s\n", cfg->enable_sampling ? "true" : "false");
+    printf("sample_p                : %.3f\n", cfg->sample_p);
+    printf("sample_window_duration  : %d\n", cfg->sample_window_duration);
+    printf("spool_dir               : %s\n", cfg->spool_dir ? cfg->spool_dir : "(null)");
+    printf("spool_max_bytes         : %zu\n", cfg->spool_max_bytes);
 
     printf("=========================\n");
 }

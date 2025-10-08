@@ -56,6 +56,7 @@ typedef struct {
  */
 int mcz_sampler_init(const char *spool_dir,
                      double sample_p,
+                     int sample_window_sec,
                      size_t spool_max_bytes);
 
 /* Start/stop background thread explicitly (optional; enable(true) also starts). */

@@ -483,7 +483,7 @@ int mcz_init(void) {
                          "mcz: GC thread started\n");
     }
     /* ---------------  initialize sampler subsystem --------------------------*/
-    mcz_sampler_init(cfg->spool_dir, cfg->sample_p, cfg->spool_max_bytes);
+    mcz_sampler_init(cfg->spool_dir, cfg->sample_p, cfg->sample_window_duration, cfg->spool_max_bytes);
     return 0;
 }
 
