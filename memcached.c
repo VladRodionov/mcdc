@@ -278,6 +278,9 @@ static void settings_init(void) {
 #ifdef SOCK_COOKIE_ID
     settings.sock_cookie_id = 0;
 #endif
+#ifdef USE_ZSTD
+    settings.disable_comp = false;
+#endif
 
 }
 
@@ -4878,6 +4881,9 @@ int main (int argc, char **argv) {
 #ifdef SOCK_COOKIE_ID
         COOKIE_ID,
 #endif
+#ifdef USE_ZSTD
+        DISABLE_COMP
+#endif
     };
     char *const subopts_tokens[] = {
         [MAXCONNS_FAST] = "maxconns_fast",
@@ -4941,6 +4947,9 @@ int main (int argc, char **argv) {
 #endif
 #ifdef SOCK_COOKIE_ID
         [COOKIE_ID] = "sock_cookie_id",
+#endif
+#ifdef USE_ZSTD
+        [DISABLE_COMP] = "disable_comp",
 #endif
         NULL
     };
@@ -5710,6 +5719,11 @@ int main (int argc, char **argv) {
             case COOKIE_ID:
                 (void)safe_strtoul(subopts_value, &settings.sock_cookie_id);
                 break;
+#endif
+#ifdef USE_ZSTD
+                case DISABLE_COMP:
+                    settings.disable_comp = true;
+                    break;
 #endif
             default:
 #ifdef EXTSTORE
