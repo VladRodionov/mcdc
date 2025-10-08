@@ -19,7 +19,7 @@
  * Standalone background sampler for key/value data.
  * - Producers call mcz_sampler_maybe_record() to submit samples (Bernoulli p).
  * - An internal MPSC queue buffers records.
- * - A single background thread drains to a spool file until a size cap.
+ * - A single background thread drains to a spool file until a size cap or timed window expired.
  * - When the file hits the cap, sampling is auto-disabled.
  *
  * Record format (LE):
