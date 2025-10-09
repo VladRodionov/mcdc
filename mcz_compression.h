@@ -46,11 +46,14 @@
 #include "mcz_dict.h"
 #include "mcz_stats.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* ---------- portable atomic_uintptr_t --------------------------------- */
 #if defined(__STDC_NO_ATOMICS__)
-    /* compiler has no C11 atomics at all */
-    typedef volatile uintptr_t  atomic_uintptr_t;
+/* compiler has no C11 atomics at all */
+typedef volatile uintptr_t  atomic_uintptr_t;
 #   define atomic_load_explicit(p,o)          (*(p))
 #   define atomic_store_explicit(p,v,o)       (*(p) = (v))
 #   define atomic_exchange_explicit(p,v,o)    (__sync_lock_test_and_set((p),(v)))
@@ -58,7 +61,7 @@
 #elif !defined(atomic_uintptr_t)
 /* compiler supports C11 atomics, but typedef may be missing       */
 #ifndef __CDT_PARSER__          /* <-- hide from Eclipse indexer */
-    typedef _Atomic uintptr_t  atomic_uintptr_t;
+typedef _Atomic uintptr_t  atomic_uintptr_t;
 #else                           /* CDT fallback: no _Atomic keyword */
 typedef uintptr_t atomic_uintptr_t;
 #endif
@@ -115,9 +118,9 @@ void mcz_destroy(void);
 /* Fast-path API for Memcached */
 
 ssize_t mcz_decompress(const void *src,
-        size_t src_size, void *dst, size_t dst_sz, uint16_t dict_id);
+                       size_t src_size, void *dst, size_t dst_sz, uint16_t dict_id);
 ssize_t mcz_maybe_compress(const void *src, size_t src_sz, const void* key, size_t key_sz,
-                    void **dst, uint16_t *dict_id_out);
+                           void **dst, uint16_t *dict_id_out);
 ssize_t mcz_orig_size(const void *src, size_t comp_size);
 
 /* Return values
@@ -149,4 +152,7 @@ const char ** mcz_list_namespaces(size_t *count);
 
 bool mcz_dict_exists(uint16_t id);
 
+#ifdef __cplusplus
+}
+#endif
 #endif /* MCZ_COMPRESSION_H */

@@ -794,7 +794,7 @@ my $ext_path;
 if (supports_extstore()) {
     note "mget + extstore tests";
     $ext_path = "/tmp/extstore.$$";
-    my $server = new_memcached("-m 64 -U 0 -o ext_page_size=8,ext_wbuf_size=2,ext_threads=1,ext_io_depth=2,ext_item_size=512,ext_item_age=2,ext_recache_rate=10000,ext_max_frag=0.9,ext_path=$ext_path:64m,slab_automove=0,ext_compact_under=1,no_lru_crawler");
+    my $server = new_memcached("-m 64 -U 0 -o disable_comp,ext_page_size=8,ext_wbuf_size=2,ext_threads=1,ext_io_depth=2,ext_item_size=512,ext_item_age=2,ext_recache_rate=10000,ext_max_frag=0.9,ext_path=$ext_path:64m,slab_automove=0,ext_compact_under=1,no_lru_crawler");
     my $sock = $server->sock;
 
     my $value;

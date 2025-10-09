@@ -22,8 +22,7 @@
  *   - Evaluate data samples for entropy or patterns.
  *   - Quickly decide whether to bypass compression.
  *   - Maintain state for tuning thresholds if enabled.
- * Compile: cc -O3 -std=c11 your.c -lm            (no probe)
- *           cc -O3 -std=c11 your.c -lm -lzstd -DMCZ_ENABLE_ZSTD_PROBE   (with probe)
+ *
  *   You can override defaults with -DMCZ_SAMPLE_BYTES=512 etc.
  */
 #ifndef MCZ_INCOMPRESSIBLE_H
@@ -35,8 +34,8 @@
 #include <string.h>
 #include <math.h>
 
-#ifndef MCZ_MIN_COMP_SIZE
-#define MCZ_MIN_COMP_SIZE      32u      // don't bother below this
+#ifdef __cplusplus
+extern "C" {
 #endif
 
 #ifndef MCZ_SAMPLE_BYTES
@@ -64,4 +63,7 @@ enum { MCZ_PROBE_DSTMAX = (int)(MCZ_SAMPLE_BYTES + (MCZ_SAMPLE_BYTES >> 7) + 256
 
 bool is_likely_incompressible(const uint8_t *p, size_t n);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

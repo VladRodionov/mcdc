@@ -545,7 +545,7 @@ static int build_ns_ascii(char **outp, size_t *lenp) {
 
 void process_mcz_command_ascii(conn *c, token_t *tokens, const size_t ntokens)
 {
-    
+
     if (ntokens < 2 || strcmp(tokens[COMMAND_TOKEN].value, "mcz") != 0) {
         out_string(c, "CLIENT_ERROR bad command");
         return;
@@ -645,7 +645,7 @@ void process_mcz_command_ascii(conn *c, token_t *tokens, const size_t ntokens)
 
     /* Serialize */
     char *out = NULL; size_t len = 0;
-    
+
     if (want_json) {
        rc = build_stats_json(&out, &len, ns ? ns : "global", &snap);
     } else {
@@ -829,7 +829,7 @@ void process_mcz_stats_bin(conn *c)
     /* JSON payload */
     char *payload = NULL;
     size_t plen = 0;
-    
+
     if (build_stats_json(&payload, &plen, ns ? ns : "global", &snap) < 0) {
         write_bin_error(c, PROTOCOL_BINARY_RESPONSE_ENOMEM, NULL, 0);
         return;

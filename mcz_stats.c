@@ -108,7 +108,7 @@ mcz_stats_registry_init(mcz_stats_registry_t *r, size_t nbuckets)
     if (!t) return -ENOMEM;
 
     /* create "default" namespace entry */
-    
+
     const char *defname = "default";
     mcz_stats_atomic_t *stats = (mcz_stats_atomic_t *)calloc(1, sizeof(*stats));
     if (!stats) { table_free(t, /*free_stats=*/1); return -ENOMEM; }
@@ -125,7 +125,7 @@ mcz_stats_registry_init(mcz_stats_registry_t *r, size_t nbuckets)
     e->stats = stats;
     e->next  = t->buckets[b];
     t->buckets[b] = e;
-    
+
     atomic_store_explicit(&r->default_stats, stats, memory_order_release);
     atomic_store_explicit(&r->only_default, (uint8_t)1, memory_order_release);
 
@@ -199,7 +199,7 @@ static int mcz_stats_sync_global(void)
     skipped_comp_min_size   += atomic_load_explicit(&st->skipped_comp_min_size,    memory_order_relaxed);
     skipped_comp_max_size += atomic_load_explicit(&st->skipped_comp_max_size,  memory_order_relaxed);
     skipped_comp_incomp  += atomic_load_explicit(&st->skipped_comp_incomp,   memory_order_relaxed);
-    
+
     /* Release the snapshot */
     atomic_fetch_sub_explicit(&t->refcnt, 1, memory_order_acq_rel);
 
@@ -297,7 +297,7 @@ void mcz_stats_snapshot_fill(mcz_stats_atomic_t* s,
     o->compress_errs = ld64(&s->compress_errs);
     o->decompress_errs = ld64(&s->decompress_errs);
     o->dict_miss_errs = ld64(&s->dict_miss_errs);
-    
+
     o->skipped_comp_min_size = ld64(&s->skipped_comp_min_size);
     o->skipped_comp_max_size = ld64(&s->skipped_comp_max_size);
     o->skipped_comp_incomp = ld64(&s->skipped_comp_incomp);
@@ -383,7 +383,7 @@ mcz_stats_lookup_by_ns(const char *nsp, size_t nsp_sz)
             if (!ns) continue;
             size_t nlen = strlen(ns);
             if (nlen != nsp_sz) continue;
-            
+
             if (memcmp(nsp, ns, nlen) == 0) {
                 found = e->stats;
                 break;
@@ -437,7 +437,7 @@ int mcz_stats_rebuild_from_list(const char **names, size_t N, size_t nbuckets_ne
     if (!neu) return -ENOMEM;
 
     /* Populate new table entries, reusing old stats when possible */
- 
+
     for (size_t i = 0; i < N; ++i) {
         const char *name = names[i];
         mcz_stats_ns_entry_t *e;
@@ -445,7 +445,7 @@ int mcz_stats_rebuild_from_list(const char **names, size_t N, size_t nbuckets_ne
         size_t b;
 
         if (!name || !*name) continue;
-        
+
         stats = find_stats(old, name);
         if (!stats) {
             /* New namespace: allocate fresh stats block */

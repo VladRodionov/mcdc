@@ -47,8 +47,6 @@ mcz_cfg_t * mcz_config_get(void) {
     return &g_cfg;
 }
 
-/* Trim helpers unchanged ... */
-
 /* size parser: accepts K,KB,KiB,M,MB,MiB,G,GB,GiB (case-insensitive) */
 static int parse_bytes(const char *val, int64_t *out) {
     if (!val || !*val) return -EINVAL;
@@ -194,12 +192,6 @@ static inline bool strnull_or_empty(const char *s) {
     return (s == NULL) || (s[0] == '\0');
 }
 
-/**
- * Sanity check configuration.
- * If mandatory parameters are missing:
- *   - disables compression and dictionary (sets enable_comp/enable_dict = false).
- * Returns 0 if OK, -1 if degraded (sanity failure).
- */
 int mcz_config_sanity_check(void) {
     mcz_cfg_t *cfg = &g_cfg;
     if (!cfg) return -1;
@@ -239,7 +231,7 @@ int parse_mcz_config(const char *path)
         fprintf(stderr, "zstd: cannot open %s: %s\n", path, strerror(errno));
         return -errno;
     }
-    
+
     char  *line = NULL;
     size_t cap  = 0;
     int    rc   = 0;

@@ -147,7 +147,7 @@ static int parse_manifest_file(const char *mf_path, const char *dir, mcz_dict_me
         m->prefixes[0] = xstrdup("default");
         m->nprefixes = 1;
     }
-    
+
     return 0;
 }
 
@@ -532,7 +532,7 @@ mcz_table_t *mcz_scan_dict_dir(const char *dir,
                                int comp_level,
                                char **err_out)
 {
-    
+
     if (!dir || !*dir) { set_err(err_out, "mcz_scan_dict_dir: empty dir"); return NULL; }
     if (max_per_ns == 0) max_per_ns = 1;
 
@@ -630,7 +630,7 @@ mcz_table_t *mcz_scan_dict_dir(const char *dir,
                 if (kept_active < max_per_ns) {
                     kept_active++;
                 } else {
-                    int32_t ref_left = -1; 
+                    int32_t ref_left = -1;
                     mcz_dict_pool_release_for_meta(m, &ref_left, err_out);
                     if (ref_left == 0) {
                         /* retire overflow (persist to manifest) */
@@ -964,7 +964,7 @@ mcz_table_t *table_clone_plus(const mcz_table_t *old,
                                      const mcz_dict_meta_t *new_meta_in,
                                      const ZSTD_CDict *cdict,
                                      const ZSTD_DDict *ddict,
-                                     size_t max_per_ns,              
+                                     size_t max_per_ns,
                                      char **err_out)
 {
     mcz_table_t *tab = (mcz_table_t*)calloc(1, sizeof(*tab));

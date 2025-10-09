@@ -18,8 +18,8 @@
  *
  * This header defines prototypes and constants for the ASCII and binary
  * command extensions used by the MCZ module. These include "mcz stats",
- * "mcz ns", and "mcz config", which allow clients to query runtime
- * statistics, list active namespaces, and view current configuration.
+ * "mcz ns", "mcz config" and "mcz sampler", which allow clients to query runtime
+ * statistics, list active namespaces, view current configuration and control data sampling.
  *
  * Responsibilities:
  *   - Declare command opcodes for the binary protocol.
@@ -35,6 +35,10 @@
 #include "memcached.h"     /* conn, out_string, write_* */
 #include "proto_text.h"
 #include "protocol_binary.h"  /* for protocol headers */
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #define PROTOCOL_BINARY_CMD_MCZ_STATS 0xE1
 #define PROTOCOL_BINARY_CMD_MCZ_NS 0xE2
@@ -56,3 +60,7 @@ void process_mcz_sampler_bin(conn *c);
 
 /* Ascii handler */
 void process_mcz_command_ascii(conn *c, token_t *tokens, const size_t ntokens);
+
+#ifdef __cplusplus
+}
+#endif

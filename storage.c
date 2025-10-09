@@ -147,25 +147,77 @@ void storage_stats(ADD_STAT add_stats, void *c) {
 }
 
 #ifdef USE_ZSTD
-static int replace_value_size_inplace(char *line, size_t new_size) {
+/* Replace the "bytes" (ASCII length) field in the first response line.
+ * - If line starts with "VALUE ", replace the 4th token (bytes).
+ * - If line starts with "VA ",    replace the 2nd token (vlen).
+ * - Otherwise: do nothing, return 0.
+ *
+ * Assumptions:
+ * - 'line' contains at least one full header line ending with "\r\n".
+ * - The buffer has enough spare capacity (we cap at 1024 here).
+ * Returns 0 on success / no-op, -1 on parse/space errors.
+ */
+static int replace_value_size_inplace(char *line, size_t new_size, bool *result) {
     if (!line) return -1;
 
-    // Find last space before size
-    char *last_space = strrchr(line, ' ');
-    if (!last_space) return -1;
+    const size_t CAP = 1024; /* adjust if your buffer is larger */
+    char *eol = strstr(line, "\r\n");
+    if (!eol) return -1; /* need a complete header line */
 
-    // Overwrite from last_space+1 up to CRLF
-    char *crlf = strstr(last_space, "\r\n");
-    if (!crlf) return -1;
+    /* Identify which protocol line we have and locate the field bounds. */
+    char *start = NULL; /* start of the numeric field to replace */
+    char *end   = NULL; /* first char after the numeric field      */
 
-    int written = snprintf(last_space + 1,
-                           (size_t)(1024 - (last_space - line) - 1),
-                           "%zu\r\n", new_size);
-    if (written < 0) return -1;
+    if (strncmp(line, "VALUE ", 6) == 0) {
+        /* VALUE <key> <flags> <bytes> [<cas>] */
+        char *p1 = strchr(line + 6, ' ');               if (!p1) return -1; /* end of <key>   */
+        char *p2 = p1 ? strchr(p1 + 1, ' ') : NULL;     if (!p2) return -1; /* end of <flags> */
+        /* bytes field starts after p2+1; ends at next ' ' or CR */
+        start = p2 + 1;
+        end = strpbrk(start, " \r");
+        if (!end || end > eol) return -1;
+
+    } else if (strncmp(line, "VA ", 3) == 0) {
+        /* VA <vlen> [<key> ...]  (meta get with value) */
+        start = line + 3;
+        end = strpbrk(start, " \r");
+        if (!end || end > eol) return -1;
+
+    } else {
+        /* Not a header we should touch */
+        return 0;
+    }
+
+    *result = true;
+    /* Prepare the new number as ASCII */
+    char nb[32];
+    int n = snprintf(nb, sizeof(nb), "%zu", new_size);
+    if (n < 0 || (size_t)n >= sizeof(nb)) return -1;
+
+    size_t oldlen = (size_t)(end - start);
+
+    /* If lengths match, simple overwrite */
+    if ((size_t)n == oldlen) {
+        memcpy(start, nb, (size_t)n);
+        return 0;
+    }
+
+    /* Need to shift the tail (remainder of the header line + CRLF). */
+    char *tail     = end;
+    char *line_end = eol + 2; /* position just after "\r\n" */
+    size_t tail_len = (size_t)(line_end - tail);
+
+    /* Capacity check (best-effort, if you know your real cap use that) */
+    size_t cur_len = (size_t)(line_end - line);
+    size_t new_len = cur_len + ((size_t)n - oldlen);
+    if (new_len > CAP) return -1;
+
+    /* Move tail to make room or close the gap, then write the new digits */
+    memmove(start + n, tail, tail_len);
+    memcpy(start, nb, (size_t)n);
 
     return 0;
 }
-
 
 static inline int num_len(size_t n) {
     int len = (n <= 0) ? 1 : 0;   // '0' has length 1, negatives add '-'
@@ -228,13 +280,14 @@ static void _storage_get_item_cb(void *e, obj_io *io, int ret) {
         const void *src     = ITEM_data(read_it);
         size_t      compLen = read_it->nbytes;
         size_t expect = ZSTD_getFrameContentSize(src, compLen);
+        /*DEBUG*/ fprintf(stderr, "comp=%zu raw=%zu\n", compLen, expect);
         if (expect == ZSTD_CONTENTSIZE_ERROR || expect == ZSTD_CONTENTSIZE_UNKNOWN){
             fprintf(stderr, "[mcz] decompress: corrupt frame (id=%u, compLen=%zu, start=%llu)\n",
                     did, compLen, *(uint64_t *)src);
             mcz_report_decomp_err(ITEM_key(read_it), read_it->nkey);
             miss = true;
         }
-        
+
         /* we need to allocate new item*/
         if (!miss){
             size_t ntotal = ITEM_ntotal(read_it);
@@ -264,24 +317,33 @@ static void _storage_get_item_cb(void *e, obj_io *io, int ret) {
                         mcz_report_decomp_err(ITEM_key(read_it), read_it->nkey);
                     }
                 } else {
-                    int off = bin_proto? 2: 0; // value has \r\n at the end which is not needed in binary
+                    int crlf = 2;//bin_proto? 2: 0; // value has \r\n at the end which is not needed in binary
                     io->decomp_buf = (char *) new_it;
                     read_it = new_it;
-
+                    bool bytes_replaced = false;
                     if (!bin_proto) {
-                        replace_value_size_inplace(resp->wbuf, expect - off);
+                        replace_value_size_inplace(resp->wbuf, expect - crlf, &bytes_replaced);
                     } else {
                         protocol_binary_response_header *header =
                             (protocol_binary_response_header *)resp->wbuf;
                         uint32_t body_len = ntohl(header->response.bodylen);
-                        body_len += expect - compLen;
+                        body_len += expect - crlf - compLen;
                         header->response.bodylen = htonl(body_len);
                     }
                     p->io_ctx.len = ntotal;
-                    
-                    resp->iov[p->iovec_data].iov_len = expect - off;
-                    resp->tosend += (expect - compLen);
-                    if (!bin_proto) resp->tosend += num_len_diff(expect, compLen);
+
+                    if (!bin_proto) {
+                        resp->iov[p->iovec_data].iov_len = expect;
+                        resp->tosend += (expect - compLen); // \r\n at the end of a value adds 2 bytes
+                        if (bytes_replaced) {
+                            int delta = num_len_diff(expect - crlf, compLen);
+                            resp->tosend += delta;
+                            resp->iov[p->iovec_data -1].iov_len += delta;
+                        }
+                    } else {
+                        resp->iov[p->iovec_data].iov_len = expect - crlf;
+                        resp->tosend += (expect - crlf - compLen);
+                    }
                 }
             }
         }

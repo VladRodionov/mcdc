@@ -46,7 +46,7 @@ typedef struct {
     bool    configured;           /* has init succeeded */
     bool    running;              /* background thread running */
     size_t  bytes_written;        /* current file size (bytes) */
-    size_t  bytes_collected;      /* current file size (bytes) */
+    size_t  bytes_collected;      /* current bytes collected (bytes) */
     char    current_path[1024];   /* current file path ("" if none) */
 } mcz_sampler_status_t;
 

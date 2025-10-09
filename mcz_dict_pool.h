@@ -44,7 +44,7 @@ extern "C" {
 int  mcz_dict_pool_init(void);
 void mcz_dict_pool_shutdown(void);
 
-/* Retain compiled dicts for this meta (keyed by dict_path or signature). 
+/* Retain compiled dicts for this meta (keyed by dict_path or signature).
    If compiled dicts are not present, the function uses the provided pointers.
    Returns 0 on success. */
 int mcz_dict_pool_retain_for_meta(mcz_dict_meta_t *m, char **err_out);

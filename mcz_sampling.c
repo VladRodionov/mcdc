@@ -202,7 +202,7 @@ static void free_list(full_sample_node_t *n) {
 
 static void *sampler_main(void *arg) {
     (void)arg;
-    
+
     /* Ensure directory exists (best-effort) */
     if (g_cfg.spool_dir && *g_cfg.spool_dir) {
         if (mkdir(g_cfg.spool_dir, 0777) != 0 && errno != EEXIST) {
@@ -210,7 +210,7 @@ static void *sampler_main(void *arg) {
             return NULL;
         }
     }
-    
+
     /* Open file */
     time_t start = time(NULL);
     if (make_path(g_path, sizeof(g_path), g_cfg.spool_dir, start) != 0) {
@@ -224,7 +224,7 @@ static void *sampler_main(void *arg) {
         atomic_store_explicit(&g_running, false, memory_order_release);
         return NULL;
     }
-    
+
     /* Buffered writer */
     bufw_t bw;
     if (bufw_init(&bw, fd, 1u << 20) != 0) {
@@ -233,13 +233,13 @@ static void *sampler_main(void *arg) {
         atomic_store_explicit(&g_running, false, memory_order_release);
         return NULL;
     }
-    
+
     atomic_store_explicit(&g_written, 0, memory_order_release);
-    
+
     const size_t cap = g_cfg.spool_max_bytes ? g_cfg.spool_max_bytes : ((size_t)64 * 1024 * 1024);
     const struct timespec ts = { .tv_sec = 0, .tv_nsec = 10 * 1000 * 1000 }; /* 10ms */
     full_sample_node_t *lst = NULL, *cur = NULL;
-    
+
     bool time_limit_enabled = g_cfg.sample_window_sec > 0;
     while (atomic_load_explicit(&g_running, memory_order_acquire)) {
         cur = NULL; lst = NULL;
@@ -251,7 +251,7 @@ static void *sampler_main(void *arg) {
         }
         lst = mpsc_drain();
         if (!lst) { nanosleep(&ts, NULL); continue; }
-        
+
         lst = reverse_list(lst);
         for (cur = lst; cur; ) {
             if (cur->klen <= UINT32_MAX && cur->vlen <= UINT32_MAX) {
@@ -267,7 +267,7 @@ static void *sampler_main(void *arg) {
                 if (cur->vlen && bufw_write(&bw, cur->val, cur->vlen) != 0) {
                     goto io_error;
                 }
-                
+
                 size_t inc = 8 + cur->klen + cur->vlen;
                 size_t total = atomic_fetch_add_explicit(&g_written, inc, memory_order_acq_rel) + inc;
                 if (total >= cap) {
@@ -281,7 +281,7 @@ static void *sampler_main(void *arg) {
             cur = nx;
         }
     }
-    
+
     (void)bufw_flush(&bw);
     bufw_destroy(&bw);
     if (fd >= 0) { close(fd); fd = -1; }
@@ -294,7 +294,7 @@ stop:
     (void)bufw_flush(&bw);
     bufw_destroy(&bw);
     if (fd >= 0) { close(fd); fd = -1; }
-    
+
     atomic_store_explicit(&g_collected, 0, memory_order_release);
     atomic_store_explicit(&g_running, false, memory_order_release);
     /* free leftovers from current batch */
@@ -365,7 +365,7 @@ int mcz_sampler_maybe_record(const void *key, size_t klen,
         if (fast_rand32() > threshold) return 0;
     }
     size_t collected = atomic_load_explicit(&g_collected, memory_order_acquire);
-    
+
     if (collected >= g_cfg.spool_max_bytes) {
         return 0;
     }

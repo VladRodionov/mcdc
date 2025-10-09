@@ -36,6 +36,10 @@
 #include <stddef.h>
 #include "zstd.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* ---- One dictionary ---- */
 typedef struct mcz_dict_meta_s {
     uint16_t          id;
@@ -96,15 +100,17 @@ int mcz_save_dictionary_and_manifest(const char *dir,
                                      mcz_dict_meta_t *out_meta,
                                      char **err_out);
 mcz_table_t *table_clone_plus(const mcz_table_t *old,
-                                     const mcz_dict_meta_t *new_meta_in,
-                                     const ZSTD_CDict *cdict,
-                                     const ZSTD_DDict *ddict,
-                                     size_t max_per_ns,
+                              const mcz_dict_meta_t *new_meta_in,
+                              const ZSTD_CDict *cdict,
+                              const ZSTD_DDict *ddict,
+                              size_t max_per_ns,
                               char **err_out);
 int mcz_mark_dict_retired(mcz_dict_meta_t *meta, time_t now, char **err_out);
 int mcz_next_available_id(const mcz_dict_meta_t *metas, size_t n,
                           int64_t quarantine_s, uint16_t *out_id, char **err_out);
 bool mcz_has_default_dict(const mcz_table_t *tab);
 
-
+#ifdef __cplusplus
+}
+#endif
 #endif

@@ -38,11 +38,16 @@ my $value;
     isnt($cas, 0, "got a real cas value back");
 
     print $sock "extstore item_age 1\r\n";
+    print STDOUT "extstore item_age 1\r\n";
     is(scalar <$sock>, "OK\r\n");
+    print STDOUT "OK\r\n";
+    print STDOUT "Wait extstore flush\r\n";
     wait_ext_flush($sock);
-
+    print STDOUT "Done\r\n";
     my ($cas2, $val2) = mem_gets($sock, "foo");
+        print STDOUT "gets\r\n";
     my $stats = mem_stats($sock);
+        print STDOUT "stats\r\n";
     is($stats->{get_extstore}, 1, 'one object was fetched');
     is($stats->{recache_from_extstore}, 0, 'no object recached');
 

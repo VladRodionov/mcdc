@@ -41,6 +41,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <inttypes.h>
+
 
 typedef struct pool_entry_s {
     struct pool_entry_s *next;
@@ -213,10 +215,6 @@ int mcz_dict_pool_refcount_for_meta(const mcz_dict_meta_t *meta)
     pthread_mutex_unlock(&g_lock);
     return -1;
 }
-
-#include <stdio.h>
-#include <inttypes.h>
-#include "mcz_dict_pool.h"
 
 void mcz_dict_pool_dump(FILE *out)
 {

@@ -30,7 +30,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* --------------------------------------------------------------------
  * User-tunable parameters for the zstd integration
@@ -60,7 +62,7 @@ typedef struct {
     double   ewma_alpha;            // 0..1
     double   retrain_drop;          // 0..1
     mcz_train_mode_t train_mode;    // FAST (default) or OPTIMIZE
-    
+
     // GC
     int32_t gc_cool_period;         // default, 1h - time to keep retired dictionary data in memory
     int32_t gc_quarantine_period;   // default: 7d, time to keep retired dictionary in a file system
@@ -129,4 +131,9 @@ mcz_cfg_t * mcz_config_get(void);
 void mcz_init_default_config(void);
 
 int mcz_config_sanity_check(void);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif /* MCZ_CONFIG_H */

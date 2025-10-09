@@ -211,11 +211,11 @@ static void gc_process_expired_batch(mcz_ctx_t *ctx, mcz_retired_node_t *batch_h
 
 static void *gc_thread_main(void *arg) {
     mcz_ctx_t *ctx = (mcz_ctx_t*)arg;
-    
+
     const unsigned min_sleep_ms = 200;     /* quick wake-up for bursts */
     const unsigned max_sleep_ms = 2000;    /* backoff upper bound */
     unsigned cur_sleep_ms = min_sleep_ms;
-    
+
     while (!atomic_load_explicit(&ctx->gc_stop, memory_order_acquire)) {
         /* Drain the MPSC stack in one atomic op */
         mcz_retired_node_t *batch = atomic_exchange_explicit(&ctx->gc_retired_head, NULL, memory_order_acq_rel);
@@ -247,7 +247,7 @@ static void *gc_thread_main(void *arg) {
 
 int mcz_gc_start(mcz_ctx_t *ctx) {
     if (!ctx) return -EINVAL;
-    
+
     atomic_store_explicit(&ctx->gc_stop, false, memory_order_relaxed);
     atomic_store_explicit(&ctx->gc_retired_head, NULL, memory_order_relaxed);
 

@@ -42,6 +42,10 @@
 #include <stdint.h>
 #include <string.h>   /* memcpy */
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* --- Config (owned by module; read-only after mcz_eff_configure) --- */
 typedef struct mcz_train_cfg_s {
     bool     enable_training;       /* enable online training */
@@ -52,7 +56,7 @@ typedef struct mcz_train_cfg_s {
 } mcz_train_cfg_t;
 
 /* --- Lock-free EWMA tracker (singleton) ---
-   Tracks compression ratio = comp/orig (lower is better). */
+ Tracks compression ratio = comp/orig (lower is better). */
 typedef struct mcz_eff_tracker_atomic_s {
     _Atomic uint64_t ewma_bits;       /* bit-cast double EWMA */
     _Atomic uint64_t baseline_bits;   /* bit-cast double at last retrain */
@@ -76,7 +80,7 @@ void mcz_eff_get_config(mcz_train_cfg_t *out_cfg);
 void mcz_eff_init(uint64_t now_s);
 
 void mcz_eff_on_observation(size_t original_bytes,
-                                   size_t compressed_bytes);
+                            size_t compressed_bytes);
 
 bool mcz_eff_should_retrain(uint64_t now_s);
 
@@ -88,5 +92,9 @@ double mcz_eff_get_baseline(void);
 
 uint64_t mcz_eff_last_train_seconds(void);
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #endif /* MCZ_EFF_ATOMIC_H */
+

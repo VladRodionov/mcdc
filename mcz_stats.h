@@ -39,6 +39,9 @@
 #include <time.h>
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef struct {
     // throughput
@@ -47,7 +50,7 @@ typedef struct {
     _Atomic uint64_t writes_total;
     _Atomic uint64_t reads_total;
 
- 
+
     // shadow
     _Atomic uint64_t shadow_samples;
     _Atomic uint64_t shadow_raw_total;
@@ -64,7 +67,7 @@ typedef struct {
     // errors
     _Atomic uint64_t compress_errs, decompress_errs, dict_miss_errs;
     _Atomic uint64_t skipped_comp_min_size, skipped_comp_max_size, skipped_comp_incomp;
-    
+
 } mcz_stats_atomic_t;
 
 typedef struct {
@@ -79,13 +82,13 @@ typedef struct {
     uint64_t last_retrain_ms;
     uint64_t trainer_runs, trainer_errs, trainer_ms_last;
     uint64_t reservoir_bytes, reservoir_items;
-    
+
     uint32_t shadow_pct;
     uint64_t shadow_samples;
     uint64_t shadow_raw_total;
     int64_t  shadow_saved_bytes;
     uint32_t promotions, rollbacks;
-    
+
     uint32_t triggers_rise, triggers_drop, cooldown_win_left;
     uint64_t compress_errs, decompress_errs, dict_miss_errs;
     uint64_t skipped_comp_min_size, skipped_comp_max_size, skipped_comp_incomp;
@@ -95,7 +98,7 @@ typedef struct {
 /* Immutable entry ➜ points to shared stats block */
 typedef struct mcz_stats_ns_entry_s {
     const char *name;                // owned by table (heap)
-    size_t      name_len;            // cached length 
+    size_t      name_len;            // cached length
     mcz_stats_atomic_t *stats;       // owned separately; reused across rebuilds
     struct mcz_stats_ns_entry_s *next;     // hash chain
 } mcz_stats_ns_entry_t;
@@ -144,4 +147,8 @@ void mcz_stats_snapshot_dump(const mcz_stats_snapshot_t *s, const char *ns);
 void mcz_stats_snapshot_dump_json(const mcz_stats_snapshot_t *s, const char *ns);
 
 int mcz_stats_is_default(mcz_stats_atomic_t * stats, bool *res);
+
+#ifdef __cplusplus
+}
+#endif
 

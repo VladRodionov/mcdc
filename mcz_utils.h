@@ -27,13 +27,16 @@
  */
 #ifndef MCZ_UTILS_H
 #define MCZ_UTILS_H
-#include <stdint.h>   // uint64_t, uint16_t
-#include <stdarg.h>   // va_lis
+#include <stdint.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <time.h>
 #include <sys/types.h>
 #include <ctype.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 /*
  * Common utility functions for MCZ project.
  *
@@ -41,71 +44,23 @@
  * set_err() with free().
  */
 
-/**
- * Format an error string into *err_out.
- * Allocates memory with malloc/strdup.
- */
 void set_err(char **err_out, const char *fmt, ...);
 
-/**
- * Format a UTC timestamp into RFC3339 form.
- * Buffer must have space for at least 32 bytes.
- *
- * Example output: "2025-09-16T22:45:17Z"
- */
 void format_rfc3339_utc(time_t t, char out[32]);
 
-/**
- * Atomically write a binary file to disk.
- * Writes to a temporary file, fsyncs, and renames to final_path.
- *
- * dir         - directory path (used for fsync)
- * final_path  - absolute path of target file
- * data,len    - buffer to write
- * mode        - file mode bits (e.g., 0644)
- * err_out     - optional error string
- *
- * Returns 0 on success, negative errno on failure.
- */
 int atomic_write_file(const char *dir, const char *final_path,
                       const void *data, size_t len, mode_t mode,
                       char **err_out);
 
-/**
- * Atomically write a text file (null-terminated string).
- * Convenience wrapper around atomic_write_file.
- */
 int atomic_write_text(const char *dir, const char *final_path,
                       const char *text, char **err_out);
-
-/**
- * Fsync the directory to ensure a rename or file creation
- * is durably recorded.
- *
- * Returns 0 on success, negative errno on error.
- */
 int fsync_dirpath(const char *dirpath);
 
-/**
- * Join a list of namespace/prefix strings into a single string.
- *
- * - prefixes/nprefixes: array of C strings (may be NULL/0)
- * - sep: separator string (e.g., ", " or ",") — if NULL, defaults to ", "
- *
- * Returns a newly malloc()'d string the caller must free().
- * If prefixes is NULL or nprefixes==0, returns strdup("default").
- * On allocation failure, returns NULL.
- */
 char *mcz_join_namespaces(const char * const *prefixes, size_t nprefixes,
                           const char *sep);
 
 uint64_t now_usec(void);
 
-/* ----------------------------------------------------------------------
- * log_rate_limited()
- *   Prints to stderr at most once every `interval_us` micro-seconds.
- *   Uses a static timestamp; thread-safe under POSIX (atomic exchange).
- * -------------------------------------------------------------------- */
 void log_rate_limited(uint64_t interval_us, const char *fmt, ...);
 
 int str_to_u16(const char *s, uint16_t *out);
@@ -169,4 +124,7 @@ atomic_set64s(_Atomic int64_t *p, int64_t v);
 int64_t
 atomic_inc64s(_Atomic int64_t *p, int64_t delta);
 
+#ifdef __cplusplus
+}
+#endif
 #endif /* MCZ_UTILS_H */
