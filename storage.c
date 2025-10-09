@@ -280,7 +280,6 @@ static void _storage_get_item_cb(void *e, obj_io *io, int ret) {
         const void *src     = ITEM_data(read_it);
         size_t      compLen = read_it->nbytes;
         size_t expect = ZSTD_getFrameContentSize(src, compLen);
-        /*DEBUG*/ fprintf(stderr, "comp=%zu raw=%zu\n", compLen, expect);
         if (expect == ZSTD_CONTENTSIZE_ERROR || expect == ZSTD_CONTENTSIZE_UNKNOWN){
             fprintf(stderr, "[mcz] decompress: corrupt frame (id=%u, compLen=%zu, start=%llu)\n",
                     did, compLen, *(uint64_t *)src);
@@ -317,7 +316,7 @@ static void _storage_get_item_cb(void *e, obj_io *io, int ret) {
                         mcz_report_decomp_err(ITEM_key(read_it), read_it->nkey);
                     }
                 } else {
-                    int crlf = 2;//bin_proto? 2: 0; // value has \r\n at the end which is not needed in binary
+                    int crlf = 2;// value has \r\n at the end which is not needed in binary
                     io->decomp_buf = (char *) new_it;
                     read_it = new_it;
                     bool bytes_replaced = false;
