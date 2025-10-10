@@ -139,5 +139,5 @@ inline bool is_likely_incompressible(const uint8_t *p, size_t n) {
     if (mcz_probe_zstd_l1_saves(p, n)) return false;
 
     // default on ambiguity: skip
-    return true;
+    return false;
 }
