@@ -1990,6 +1990,7 @@ static int is_vendor_cmd(uint8_t cmd) {
     case 0xE2:
     case 0xE3:
     case 0xE4:
+        case 0xE5:
         return 1;
     default: return 0;
     }

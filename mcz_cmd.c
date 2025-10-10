@@ -30,6 +30,8 @@
  *   - "mcz sampler [start|stop|status]"
  *       Sampler control (spooling data, incoming key-value pairs to a file
  *           for further analysis and dictionary creation).
+ *   - "mcz reload [json]"
+ *       Reload dictionaries online
  *
  *   - PROTOCOL_BINARY_CMD_MCZ_STATS (0xE1)
  *       Binary version of "mcz stats".
@@ -42,6 +44,9 @@
  *
  *   - PROTOCOL_BINARY_CMD_MCZ_SAMPLER (0xE4)
  *       Binary sampler.
+ *
+ *   - PROTOCOL_BINARY_CMD_MCZ_RELOAD (0xE5)
+ *       Reload dictionaries.
  *
  * Each handler builds the appropriate payload (text lines or JSON),
  * attaches it to a memcached response, and writes it back through
@@ -83,14 +88,14 @@ static const char *train_mode_str(mcz_train_mode_t m) {
 static inline const char *b2s(bool v) { return v ? "true" : "false"; }
 
 /* Small helper: write a dynamic response safely */
-static void write_buf(conn *c, const char *buf, size_t len) {
-    /* memcached has helpers; write_and_free() takes ownership */
-    char *out = malloc(len + 1);
-    if (!out) { out_string(c, "SERVER_ERROR out of memory"); return; }
-    memcpy(out, buf, len);
-    out[len] = '\0';
-    write_and_free(c, out, len);
-}
+//static void write_buf(conn *c, const char *buf, size_t len) {
+//    /* memcached has helpers; write_and_free() takes ownership */
+//    char *out = malloc(len + 1);
+//    if (!out) { out_string(c, "SERVER_ERROR out of memory"); return; }
+//    memcpy(out, buf, len);
+//    out[len] = '\0';
+//    write_and_free(c, out, len);
+//}
 
 /* ---------- status builders ---------- */
 static int build_sampler_status_ascii(char **outp, size_t *lenp) {
@@ -127,13 +132,7 @@ static int build_sampler_status_ascii(char **outp, size_t *lenp) {
     return 0;
 }
 
-static int build_sampler_status_json(char **outp, size_t *lenp) {
-    mcz_sampler_status_t st;
-    mcz_sampler_get_status(&st);
-    size_t cap = 2048;
-    char *buf = (char*)malloc(cap);
-    if (!buf) return -1;
-
+static int sampler_status_json(char *buf, size_t cap, mcz_sampler_status_t *st){
     int n = snprintf(buf, cap,
         "{\r\n"
           "\"configured\":%s,\r\n"
@@ -142,35 +141,140 @@ static int build_sampler_status_json(char **outp, size_t *lenp) {
           "\"queue_collected\":%" PRIu64 ",\r\n"
           "\"path\":\"%s\"\r\n"
         "}\r\n",
-        st.configured ? "true" : "false",
-        st.running    ? "true" : "false",
-        (uint64_t)st.bytes_written,
-        (uint64_t)st.bytes_collected,
-        st.current_path[0] ? st.current_path : ""
+        st->configured ? "true" : "false",
+        st->running    ? "true" : "false",
+        (uint64_t)st->bytes_written,
+        (uint64_t)st->bytes_collected,
+        st->current_path[0] ? st->current_path : ""
     );
+    return n;
+}
+
+static int build_sampler_status_json(char **outp, size_t *lenp) {
+    mcz_sampler_status_t st;
+    mcz_sampler_get_status(&st);
+    size_t cap = 2048;
+    char *buf = (char*)malloc(cap);
+    if (!buf) return -1;
+    int n = sampler_status_json(buf, cap, &st);
     if (n < 0) { free(buf); return -1; }
+
     if ((size_t)n >= cap) {
         cap = (size_t)n + 1;
         char *nb = (char*)realloc(buf, cap);
         if (!nb) { free(buf); return -1; }
         buf = nb;
-        n = snprintf(buf, cap,
-            "{"
-              "\"configured\":%s,"
-              "\"running\":%s,"
-              "\"bytes_written\":%" PRIu64 ","
-              "\"bytes_collected\":%" PRIu64 ","
-              "\"path\":\"%s\""
-            "}\r\n",
-            st.configured ? "true" : "false",
-            st.running    ? "true" : "false",
-            (uint64_t)st.bytes_written,
-            (uint64_t)st.bytes_collected,
-            st.current_path[0] ? st.current_path : ""
-        );
+        n = sampler_status_json(buf, cap, &st);
         if (n < 0) { free(buf); return -1; }
     }
     *outp = buf; *lenp = (size_t)n;
+    return 0;
+}
+
+static int reload_status_ascii(char *buf, size_t cap, mcz_reload_status_t *st) {
+    int n;
+    if (st->rc == 0) {
+        n = snprintf(buf, cap,
+            "RELOAD status=OK\r\n"
+            "RELOAD ns=%u\r\n"
+            "RELOAD dicts_loaded=%u\r\n"
+            "RELOAD dicts_new=%u\r\n"
+            "RELOAD dicts_reused=%u\r\n"
+            "RELOAD dicts_failed=%u\r\n"
+            "END\r\n",
+            st->namespaces, st->dicts_loaded, st->dicts_new, st->dicts_reused, st->dicts_failed);
+    } else if (st->err[0]) {
+        n = snprintf(buf, cap,
+            "RELOAD status=ERR\r\n"
+            "RELOAD rc=%d\r\n"
+            "RELOAD msg=%s\r\n"
+            "RELOAD ns=%u\r\n"
+            "RELOAD dicts_loaded=%u\r\n"
+            "RELOAD dicts_new=%u\r\n"
+            "RELOAD dicts_reused=%u\r\n"
+            "RELOAD dicts_failed=%u\r\n"
+            "END\r\n",
+            st->rc, st->err, st->namespaces, st->dicts_loaded, st->dicts_new, st->dicts_reused, st->dicts_failed);
+    } else {
+        n = snprintf(buf, cap,
+            "RELOAD status=ERR\r\n"
+            "RELOAD rc=%d\r\n"
+            "RELOAD ns=%u\r\n"
+            "RELOAD dicts_loaded=%u\r\n"
+            "RELOAD dicts_new=%u\r\n"
+            "RELOAD dicts_reused=%u\r\n"
+            "RELOAD dicts_failed=%u\r\n"
+            "END\r\n",
+            st->rc, st->namespaces, st->dicts_loaded, st->dicts_new, st->dicts_reused, st->dicts_failed);
+    }
+    return n;
+}
+
+static int reload_status_json(char *buf, size_t cap, mcz_reload_status_t *st) {
+    int n;
+    if (st->rc == 0) {
+        n = snprintf(buf, cap,
+            "{\r\n"
+            "\"status\":OK\r\n"
+            "\"ns\":%u\r\n"
+            "\"dicts_loaded\":%u\r\n"
+            "\"dicts_new\":%u\r\n"
+            "\"dicts_reused\":%u\r\n"
+            "\"dicts_failed\":%u\r\n"
+            "}\r\n",
+            st->namespaces, st->dicts_loaded, st->dicts_new, st->dicts_reused, st->dicts_failed);
+    } else if (st->err[0]) {
+        n = snprintf(buf, cap,
+            "{\r\n"
+            "\"status\":ERR\r\n"
+            "\"rc\"=%d\r\n"
+            "\"msg\"=%s\r\n"
+            "\"ns\":%u\r\n"
+            "\"dicts_loaded\":%u\r\n"
+            "\"dicts_new\":%u\r\n"
+            "\"dicts_reused\":%u\r\n"
+            "\"dicts_failed\":%u\r\n"
+            "}\r\n",
+            st->rc, st->err, st->namespaces, st->dicts_loaded, st->dicts_new, st->dicts_reused, st->dicts_failed);
+    } else {
+        n = snprintf(buf, cap,
+            "{\r\n"
+            "\"status\":ERR\r\n"
+            "\"rc\"=%d\r\n"
+            "\"ns\":%u\r\n"
+            "\"dicts_loaded\":%u\r\n"
+            "\"dicts_new\":%u\r\n"
+            "\"dicts_reused\":%u\r\n"
+            "\"dicts_failed\":%u\r\n"
+            "}\r\n",
+            st->rc, st->namespaces, st->dicts_loaded, st->dicts_new, st->dicts_reused, st->dicts_failed);
+    }
+    return n;
+}
+
+/* ---------- ASCII: mcz reload ... ------------*/
+static int build_reload_status(char **outp, size_t *lenp, int json) {
+
+    mcz_reload_status_t *st = mcz_reload_dictionaries();
+    if (!st) {
+        return -1;
+    }
+    size_t cap = 512;
+    char *buf = (char*)malloc(cap);
+    int n = json?reload_status_json(buf, cap, st):reload_status_ascii(buf, cap, st);
+    if (n < 0) { free(st);free(buf);return -1; }
+
+    if ((size_t)n >= cap) {
+        cap = (size_t)n + 1;
+        char *nb = (char*)realloc(buf, cap);
+        if (!nb) { free(buf); return -1; }
+        buf = nb;
+        n = json?reload_status_json(buf, cap, st):reload_status_ascii(buf, cap, st);
+    }
+    if (n < 0) { free(buf); return -1; }
+    *outp = buf;
+    *lenp = (size_t)n;
+    free(st);
     return 0;
 }
 
@@ -213,7 +317,7 @@ static void handle_mcz_sampler_ascii(conn *c, token_t *tokens, size_t ntokens) {
         int rc = want_json ? build_sampler_status_json(&payload, &plen)
                            : build_sampler_status_ascii(&payload, &plen);
         if (rc != 0 || !payload) { out_string(c, "SERVER_ERROR sampler_status"); return; }
-        write_buf(c, payload, plen);
+        write_and_free(c, payload, plen);
         return;
     }
 
@@ -411,16 +515,6 @@ static int build_stats_ascii(char **outp, size_t *lenp,
     );
 
     if (n < 0) { free(buf); *outp = NULL; *lenp = 0; return -ENOMEM;}
-    if ((size_t)n >= cap) {
-        /* grow and retry once */
-        cap = (size_t)n + 1;
-        char *b2 = malloc(cap);
-        if (!b2) { free(buf); *outp = NULL; *lenp = 0; return -ENOMEM; }
-        n = snprintf(b2, cap, "%s", buf); /* or rebuild the whole string (better) */
-        free(buf);
-        buf = b2;
-    }
-
     *outp = buf;
     *lenp = (size_t)n;
     return 0;
@@ -485,14 +579,6 @@ static int build_stats_json(char **outp, size_t *lenp,
     );
 
     if (n < 0) { free(buf); *outp = NULL; *lenp = 0; return -ENOMEM; }
-    if ((size_t)n >= cap) {
-        cap = (size_t)n + 1;
-        char *b2 = malloc(cap);
-        if (!b2) { free(buf); *outp = NULL; *lenp = 0; return -ENOMEM; }
-        n = snprintf(b2, cap, "%s", buf); /* or rebuild exactly */
-        free(buf);
-        buf = b2;
-    }
 
     *outp = buf;
     *lenp = (size_t)n;
@@ -536,7 +622,6 @@ static int build_ns_ascii(char **outp, size_t *lenp) {
     off += (size_t)sprintf(buf + off, "END\r\n");
     buf[off] = '\0';
 
-    /* If mcz_list_namespaces() returns heap, free it; otherwise remove this free. */
     if (list) free((void*)list);
 
     *outp = buf; *lenp = off;
@@ -546,17 +631,14 @@ static int build_ns_ascii(char **outp, size_t *lenp) {
 void process_mcz_command_ascii(conn *c, token_t *tokens, const size_t ntokens)
 {
 
-    if (ntokens < 2 || strcmp(tokens[COMMAND_TOKEN].value, "mcz") != 0) {
+    if (ntokens < 3 || strcmp(tokens[COMMAND_TOKEN].value, "mcz") != 0) {
         out_string(c, "CLIENT_ERROR bad command");
-        return;
-    }
-    if (ntokens < 3) {
-        out_string(c, "CLIENT_ERROR usage: mcz <stats|ns|config|sampler> ...");
         return;
     }
 
     const char *sub = tokens[COMMAND_TOKEN + 1].value;
 
+    /* --- mcz sampler  --- */
     if (strcmp(sub, "sampler") == 0) {
         handle_mcz_sampler_ascii(c, tokens, ntokens);
         return;
@@ -565,7 +647,7 @@ void process_mcz_command_ascii(conn *c, token_t *tokens, const size_t ntokens)
     /* --- mcz config [json] --- */
     if (strcmp(sub, "config") == 0) {
         int want_json = 0;
-        if (ntokens >= 4) {
+        if (ntokens == 4) {
             const char *arg = tokens[COMMAND_TOKEN + 2].value;
             if (strcmp(arg, "json") == 0){
                 want_json = 1;
@@ -573,6 +655,9 @@ void process_mcz_command_ascii(conn *c, token_t *tokens, const size_t ntokens)
                 out_string(c, "CLIENT_ERROR bad command");
                 return;
             }
+        } else if (ntokens > 4){
+            out_string(c, "CLIENT_ERROR bad command");
+            return;
         }
 
         char *payload = NULL; size_t plen = 0;
@@ -584,13 +669,13 @@ void process_mcz_command_ascii(conn *c, token_t *tokens, const size_t ntokens)
             } else {
                 out_string(c, "SERVER_ERROR memory allocation failed");
             }
+            if(payload) free(payload);
             return;
         }
         /* write_and_free takes ownership */
         write_and_free(c, payload, (int)plen);
         return;
     }
-
 
     /* mcz ns */
     if (strcmp(sub, "ns") == 0) {
@@ -601,12 +686,32 @@ void process_mcz_command_ascii(conn *c, token_t *tokens, const size_t ntokens)
         char *payload = NULL; size_t plen = 0;
         if (build_ns_ascii(&payload, &plen) != 0) {
             out_string(c, "SERVER_ERROR out of memory");
+            if(payload) free(payload);
             return;
         }
-        write_buf(c, payload, plen);
-        free(payload);
+        write_and_free(c, payload, plen);
         return;
     }
+    /*  mcz reload [json] */
+    if(strcmp(sub, "reload") == 0) {
+        int want_json = 0;
+        if (ntokens == 4 && tokens[COMMAND_TOKEN + 2].value &&
+            strcmp(tokens[COMMAND_TOKEN + 2].value, "json") == 0) {
+            want_json = 1;
+        } else if (ntokens >= 4){
+            out_string(c, "CLIENT_ERROR bad command");
+            return;
+        }
+        char *payload = NULL; size_t plen = 0;
+        if (build_reload_status(&payload, &plen, want_json) != 0) {
+            out_string(c, "SERVER_ERROR out of memory");
+            if(payload) free(payload);
+            return;
+        }
+        write_and_free(c, payload, plen);
+        return;
+    }
+
     /* mcz stats */
     if (ntokens < 3 || strcmp(tokens[COMMAND_TOKEN + 1].value, "stats") != 0) {
         out_string(c, "CLIENT_ERROR usage: mcz stats [namespace|global|default] [json]");
@@ -624,9 +729,17 @@ void process_mcz_command_ascii(conn *c, token_t *tokens, const size_t ntokens)
             ns = arg1; /* includes "default" or any other namespace */
         }
     }
-    if (ntokens >= 5) {
+    if (ntokens == 5) {
         const char *arg2 = tokens[COMMAND_TOKEN + 3].value;
-        if (strcmp(arg2, "json") == 0) want_json = 1;
+        if (strcmp(arg2, "json") == 0) {
+            want_json = 1;
+        } else {
+            out_string(c, "CLIENT_ERROR bad command");
+            return;
+        }
+    } else if (ntokens > 5){
+        out_string(c, "CLIENT_ERROR bad command");
+        return;
     }
 
     /* Build snapshot */
@@ -654,8 +767,7 @@ void process_mcz_command_ascii(conn *c, token_t *tokens, const size_t ntokens)
     if (rc < 0) { out_string(c, "SERVER_ERROR memory allocation failed"); return; }
     if (!out) { out_string(c, "SERVER_ERROR serialization failed"); return; }
 
-    write_buf(c, out, len);
-    free(out);
+    write_and_free(c, out, len);
 }
 
 void process_mcz_sampler_bin(conn *c)
@@ -742,6 +854,53 @@ void process_mcz_sampler_bin(conn *c)
     }
 
     write_bin_error(c, PROTOCOL_BINARY_RESPONSE_EINVAL, NULL, 0);
+}
+
+void process_mcz_reload_bin(conn *c)
+{
+    const protocol_binary_request_header *req = &c->binary_header;
+
+    /* In 1.6.38, these are host-order already */
+    uint8_t  extlen  = req->request.extlen;
+    uint16_t keylen  = req->request.keylen;
+    uint32_t bodylen = req->request.bodylen;
+
+    /* Expect no body for this op */
+    if (extlen != 0 || keylen != 0 || bodylen != 0) {
+        write_bin_error(c, PROTOCOL_BINARY_RESPONSE_EINVAL, NULL, 0);
+        return;
+    }
+
+    /* Build payload */
+    char *payload = NULL; size_t plen = 0;
+    if (build_reload_status(&payload, &plen, 1) != 0 || !payload) {
+        write_bin_error(c, PROTOCOL_BINARY_RESPONSE_EINVAL, NULL, 0);
+        if(payload) free(payload);
+        return;
+    }
+
+    /* Compose response header + value into one contiguous buffer */
+    size_t total = sizeof(protocol_binary_response_header) + plen;
+    char *resp = (char *)malloc(total);
+    if (!resp) { free(payload); write_bin_error(c, PROTOCOL_BINARY_RESPONSE_ENOMEM, NULL, 0); return; }
+
+    protocol_binary_response_header h;
+    memset(&h, 0, sizeof(h));
+    h.response.magic    = PROTOCOL_BINARY_RES;
+    h.response.opcode   = PROTOCOL_BINARY_CMD_MCZ_RELOAD;   /* 0xE5 */
+    h.response.keylen   = 0;
+    h.response.extlen   = 0;
+    h.response.datatype = PROTOCOL_BINARY_RAW_BYTES;
+    h.response.status   = PROTOCOL_BINARY_RESPONSE_SUCCESS;
+    h.response.bodylen  = (uint32_t)plen;                /* host-order; core swaps on send */
+    h.response.opaque   = req->request.opaque;
+    h.response.cas      = 0;
+
+    memcpy(resp, &h, sizeof(h));
+    if (plen) memcpy(resp + sizeof(h), payload, plen);
+    free(payload);
+
+    write_and_free(c, resp, (int)total);
 }
 
 void process_mcz_cfg_bin(conn *c)

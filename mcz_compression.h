@@ -104,6 +104,17 @@ typedef struct tls_cache_s {
     size_t     cap;
 } tls_cache_t;
 
+typedef struct mcz_reload_status_s {
+    int       rc;            /* 0 = success, <0 = error */
+    uint32_t  namespaces;
+    uint32_t  dicts_new;
+    uint32_t  dicts_loaded;
+    uint32_t  dicts_reused;
+    uint32_t  dicts_retired;
+    uint32_t  dicts_failed;
+    char      err[128];
+} mcz_reload_status_t;
+
 /* forward declarations – no memcached.h needed here */
 struct _stritem;     /* real 'item' struct in items.h   */
 typedef struct _stritem item;
@@ -140,7 +151,7 @@ mcz_ctx_t       *mcz_ctx_mut(void);
 /* Feed raw samples for future dictionary training and file spooling*/
 void mcz_sample(const void *key, size_t klen, const void *value, size_t vlen);
 
-int mcz_reload_dictionaries(void);
+mcz_reload_status_t *mcz_reload_dictionaries(void);
 
 const char *
 mcz_match_namespace(const char *key, size_t klen,

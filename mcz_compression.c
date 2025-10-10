@@ -141,6 +141,78 @@ static void tls_ensure(size_t need) {
     }
 }
 
+static void reload_status_dump(const mcz_reload_status_t *st)
+{
+    int buflen = 512;
+    char buf[buflen];
+    if (!st) return;
+
+    int n;
+    if (st->rc == 0) {
+        n = snprintf(buf, buflen,
+                     "MCZ-LOAD-DICTS: OK\n"
+                     "  Namespaces:    %u\n"
+                     "  Dicts Loaded:  %u\n"
+                     "  Dicts New:     %u\n"
+                     "  Dicts Reused:  %u\n"
+                     "  Dicts Failed:  %u\n",
+                     st->namespaces,
+                     st->dicts_loaded,
+                     st->dicts_new,
+                     st->dicts_reused,
+                     st->dicts_failed);
+    } else {
+        n = snprintf(buf, buflen,
+                     "MCZ-LOAD_DICTS: ERROR (rc=%d)\n"
+                     "  Message: %s\n"
+                     "  Namespaces:    %u\n"
+                     "  Dicts Loaded:  %u\n"
+                     "  Dicts New:  %u\n"
+                     "  Dicts Reused:  %u\n"
+                     "  Dicts Failed:  %u\n",
+                     st->rc,
+                     st->err[0] ? st->err : "(none)",
+                     st->namespaces,
+                     st->dicts_loaded,
+                     st->dicts_new,
+                     st->dicts_reused,
+                     st->dicts_failed);
+    }
+
+    if (n < 0 || (size_t)n >= 512) {
+        /* truncated or error */
+        buf[buflen - 1] = '\0';
+    }
+    printf("=== MCZ Load Dictionaries Status ===\n%s", buf);
+}
+
+static void build_reload_status(mcz_table_t *newt,
+                                    mcz_table_t *oldt, mcz_reload_status_t *st) {
+    if (!st) return;
+    st->rc = 0;
+    if (!newt) {
+        st->rc = -EINVAL;
+        snprintf(st->err, sizeof(st->err), "new table is NULL");
+        return;
+    }
+    st->namespaces = (uint32_t)newt->nspaces;
+    /* Walk through all dict metas by_id in new table. */
+    for (size_t i = 0; i < 65536; i++) {
+        if(newt->by_id[i]) {
+            st->dicts_loaded++;
+            if(oldt && oldt->by_id[i]) {
+                st->dicts_reused++;
+            } else {
+                st->dicts_new++;
+            }
+        } else if(oldt && oldt->by_id[i]) {
+            st->dicts_retired++;
+        }
+    }
+    /* TODO: dicts_failed could be set if metas has some error marker */
+    st->dicts_failed = 0;
+}
+
 /* ---------------------------------------------------------------------
  * load dictionaries from a FS
  *   If dict_path == NULL it returns 1 (nothing loaded, continue live training).
@@ -154,15 +226,25 @@ static int mcz_load_dicts(void) {
         return 1;
     }
     char *err = NULL;
+    mcz_reload_status_t *st = calloc(1, sizeof(*st));
+
     mcz_table_t *tab = mcz_scan_dict_dir(ctx->cfg->dict_dir, ctx->cfg->dict_retain_max,
                                          ctx->cfg->gc_quarantine_period, ctx->cfg->zstd_level, &err);
     if (err != NULL){
         fprintf(stderr, "load dictionaries failed: %s\n", err ? err : "unknown error");
+        st->rc = -ENOENT;
+        snprintf(st->err, sizeof(st->err), "load dictionaries failed: %s\n", err ? err : "unknown error");
         free(err);
-        return 1;
+        if (!tab) return 1;
     }
     if (tab) {
         atomic_store_explicit(&ctx->dict_table, (uintptr_t)tab, memory_order_release);
+        build_reload_status(tab, NULL, st);
+        //TODO: change to 1
+        if(settings.verbose > 1) {
+            reload_status_dump(st);
+        }
+        free(st);
     } else {
         return 1;
     }
@@ -189,7 +271,6 @@ static size_t train_fastcover(void* dictBuf, size_t dictCap,
     size_t got = ZDICT_trainFromBuffer(
         dictBuf, dictCap, samplesBuf, sampleSizes, nbSamples);
 
-    /* p now holds the chosen k,d,steps */
     return got; /* check ZDICT_isError(got) / ZDICT_getErrorName(got) */
 }
 
@@ -876,20 +957,30 @@ static void mcz_publish_table(mcz_table_t *tab) {
 }
 
 /* ---- Coordinated reload (no pause-the-world) ---- */
-int mcz_reload_dictionaries(void)
+mcz_reload_status_t *mcz_reload_dictionaries(void)
 {
     mcz_ctx_t *ctx = mcz_ctx_mut();
     const char *dir = ctx->cfg->dict_dir;
     char *err = NULL;
+    mcz_reload_status_t *st = calloc(1, sizeof(*st));
+
     mcz_table_t *newtab = mcz_scan_dict_dir(dir, ctx->cfg->dict_retain_max,
                                          ctx->cfg->gc_quarantine_period, ctx->cfg->zstd_level, &err);
     if (err != NULL){
         fprintf(stderr, "reload dictionaries failed: %s\n", err ? err : "unknown error");
+        st->rc = -ENOENT;
+        snprintf(st->err, sizeof(st->err), "reload dictionaries failed: %s\n", err ? err : "unknown error");
         free(err);
-        return -ENOENT;
+        if (!newtab) return st;
     }
+    mcz_table_t *oldtab = (mcz_table_t*)atomic_load_explicit(&ctx->dict_table, memory_order_acquire);
     mcz_publish_table(newtab);
-    return 0;
+    build_reload_status(newtab, oldtab, st);
+    //TODO: change to 1
+    if(settings.verbose > 1) {
+        reload_status_dump(st);
+    }
+    return st;
 }
 
 static inline int is_default_ns(const char *ns, size_t ns_sz) {
@@ -1003,5 +1094,4 @@ const char **mcz_list_namespaces(size_t *count){
     return list;
 
 }
-
 

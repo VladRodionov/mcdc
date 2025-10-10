@@ -653,6 +653,7 @@ mcz_table_t *mcz_scan_dict_dir(const char *dir,
         return NULL;
     }
 
+    bool failed_load_some = false;
     for (size_t i=0;i<nmeta;i++) {
         mcz_dict_meta_t *m = &metas[i];
         if (m->retired != 0) continue;
@@ -662,7 +663,14 @@ mcz_table_t *mcz_scan_dict_dir(const char *dir,
             // As a side effect this function can update both: CDict and DDict references
             mcz_dict_pool_retain_for_meta(m, err_out);
         } else {
-            /* If load fails, retire and persist so FS remains the truth */
+            if (!failed_load_some) {
+                failed_load_some = true;
+                set_err(err_out, "mcz_scan_dict_dir: dict load failed. Check the server's log for details");
+            }
+            /* If load fails, retire and persist so FS remains the truth, log error even if verbose = 1 */
+            if (settings.verbose > 0){
+                fprintf(stderr, "[mcz-scan-dict-dir] failed to load %s", m->dict_path);
+            }
             mcz_mark_dict_retired(m, now, err_out);
         }
     }
