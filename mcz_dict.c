@@ -769,6 +769,16 @@ const mcz_dict_meta_t *mcz_pick_dict(const mcz_table_t *tab, const char *key, si
     return fallback;
 }
 
+bool mcz_is_default_ns(const mcz_table_t *tab, const char *key, size_t klen){
+    if(!tab || !key) return false;
+    const mcz_dict_meta_t *meta = mcz_pick_dict(tab, key, klen);
+    if(meta){
+        return (meta->nprefixes == 1 && strcmp(meta->prefixes[0], "default") == 0);
+    } else {
+        return true; // no meta yet
+    }
+}
+
 bool mcz_has_default_dict(const mcz_table_t *tab){
 
     if (!tab) {

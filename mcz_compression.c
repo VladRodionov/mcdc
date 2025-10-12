@@ -328,6 +328,7 @@ static void* trainer_main(void *arg) {
     const size_t max_dict = ctx->cfg->dict_size ? ctx->cfg->dict_size : 110 * 1024;
     const size_t train_threshold =
         ctx->cfg->min_training_size ? ctx->cfg->min_training_size : max_dict * 100; /* 100× rule */
+    time_t started = time(NULL);
 
     for (;;) {
         usleep(1000000); // 1000 ms
@@ -349,8 +350,10 @@ static void* trainer_main(void *arg) {
         /* Threshold gate */
         size_t pending = atomic_load_explicit(&ctx->bytes_pending, memory_order_acquire);
 
-        if (pending < train_threshold) continue;
+        time_t started_train = time(NULL);
 
+        if (pending < train_threshold) continue;
+                
         /* get statistics for "default" namespace*/
         mcz_stats_atomic_t * stats = mcz_stats_lookup_by_ns("default", 7);
         if (stats) atomic_inc64(&stats->trainer_runs, 1);
@@ -489,6 +492,8 @@ static void* trainer_main(void *arg) {
             set_training_active(false);               /* stop sampling until EWMA triggers again */
             mcz_eff_mark_retrained(now);
         }
+        time_t finished = time(NULL);
+        fprintf(stderr, "Traininig time: %lds from starty: %ld\n", finished - started_train, finished - started);
     }
 
     /* never reached */
@@ -601,7 +606,7 @@ void mcz_destroy(void) {
 
 }
 
-static void sample_for_training(const void *src, size_t len) {
+static void sample_for_training(const void *key, size_t klen, const void *src, size_t len) {
     mcz_ctx_t *ctx = mcz_ctx_mut();
     /* skip very large and very small items */
     if (len >ctx->cfg->max_comp_size || len < ctx->cfg->min_comp_size)
@@ -612,7 +617,7 @@ static void sample_for_training(const void *src, size_t len) {
     bool empty_state = !mcz_has_default_dict(tab);
     double p = empty_state? 1.0: ctx->cfg->sample_p;
 
-    // Suppose p is in [0,1]. Represent it as fixed-point threshold:
+    /* Suppose p is in [0,1]. Represent it as fixed-point threshold: */
     uint32_t threshold = (uint32_t)((double)UINT32_MAX * p);
 
     if (fast_rand32() > threshold) {
@@ -620,6 +625,11 @@ static void sample_for_training(const void *src, size_t len) {
     }
 
     if (is_likely_incompressible((const uint8_t *) src, len)){
+        return;
+    }
+    
+    /* Check if default namespace for this key*/
+    if (!mcz_is_default_ns(tab, key, klen)){
         return;
     }
 
@@ -663,7 +673,7 @@ static void sample_for_training(const void *src, size_t len) {
 }
 
 void mcz_sample(const void *key, size_t klen, const void* value, size_t vlen) {
-    sample_for_training(value, vlen);
+    sample_for_training(key, klen, value, vlen);
     mcz_sampler_maybe_record(key, klen, value, vlen);
 }
 

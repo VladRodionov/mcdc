@@ -48,33 +48,33 @@ typedef struct {
     // Core
     bool     enable_comp;           // default true
     bool     enable_dict;           // default true
-    char    *dict_dir;              // path
+    char    *dict_dir;              // dictionary directorypath
     size_t   dict_size;             // bytes (target dict size)
-    int      zstd_level;            // reuse existing
+    int      zstd_level;            // compression level (1-22) default: 3
     size_t   min_comp_size;         // compress if >=
     size_t   max_comp_size;         // compress if <=
     bool     compress_keys;         // compress key (false, not implemented yet)
 
     // Training
     bool     enable_training;       // enable online training
-    int64_t  retraining_interval_s; // seconds
+    int64_t  retraining_interval_s; // minimum interval between retarining attempts inseconds
     size_t   min_training_size;     // bytes of eligible data since last train
-    double   ewma_alpha;            // 0..1
-    double   retrain_drop;          // 0..1
-    mcz_train_mode_t train_mode;    // FAST (default) or OPTIMIZE
+    double   ewma_alpha;            // 0..1 (alpha in EWMA)
+    double   retrain_drop;          // 0..1 drop  in compression efficency to trigger retraining
+    mcz_train_mode_t train_mode;    // FAST (default) or OPTIMIZE (slower, sometimes can give some improvement)
 
     // GC
     int32_t gc_cool_period;         // default, 1h - time to keep retired dictionary data in memory
     int32_t gc_quarantine_period;   // default: 7d, time to keep retired dictionary in a file system
     // Retention
-    int      dict_retain_max;       // cap count of resident old dicts
+    int      dict_retain_max;       // cap count of resident old dicts per namespace
 
     // Sampling + Spool
     bool     enable_sampling;       // enable sample spooling
     double   sample_p;              // 0..1
-    int      sample_window_duration;// seconds
-    char    *spool_dir;             // path
-    size_t   spool_max_bytes;       // cap; drop-oldest windows
+    int      sample_window_duration;// maximum duration of a sampling in seconds
+    char    *spool_dir;             // path to the spool directory
+    size_t   spool_max_bytes;       // cap bytes to collect
 } mcz_cfg_t;
 
 
