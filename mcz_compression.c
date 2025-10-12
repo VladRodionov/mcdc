@@ -353,7 +353,7 @@ static void* trainer_main(void *arg) {
         time_t started_train = time(NULL);
 
         if (pending < train_threshold) continue;
-                
+
         /* get statistics for "default" namespace*/
         mcz_stats_atomic_t * stats = mcz_stats_lookup_by_ns("default", 7);
         if (stats) atomic_inc64(&stats->trainer_runs, 1);
@@ -627,7 +627,7 @@ static void sample_for_training(const void *key, size_t klen, const void *src, s
     if (is_likely_incompressible((const uint8_t *) src, len)){
         return;
     }
-    
+
     /* Check if default namespace for this key*/
     if (!mcz_is_default_ns(tab, key, klen)){
         return;
