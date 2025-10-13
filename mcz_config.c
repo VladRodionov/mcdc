@@ -257,84 +257,79 @@ int parse_mcz_config(const char *path)
         rtrim(val);
 
         /* --- dispatch -------------------------------------------------- */
-        if (strcasecmp(key, "mcz.level") == 0) {
+        if (strcasecmp(key, "comp_level") == 0) {
             char *end; errno = 0; long lvl = strtol(val, &end, 10);
             if (end == val || *end || errno) { fprintf(stderr, "%s:%d: invalid level '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             if (lvl < 1 || lvl > 22) { fprintf(stderr, "%s:%d: level %ld out of range (1-22)\n", path, ln, lvl); rc = rc?rc:-ERANGE; continue; }
             g_cfg.zstd_level = (int)lvl;
 
-        } else if (strcasecmp(key, "mcz.dict_size") == 0) {
-            int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad dict size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+        } else if (strcasecmp(key, "dict_size") == 0) {
+            int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad dict_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.dict_size = (size_t)v;
-            if (!strcasecmp(key,"max_dict")) fprintf(stderr, "%s:%d: NOTE: 'max_dict' is deprecated; use 'mcz.dict_size'\n", path, ln);
-
-        } else if (strcasecmp(key, "mcz.min_training_size") == 0) {
+        } else if (strcasecmp(key, "min_training_size") == 0) {
             int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad min_training_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.min_training_size = (size_t)v;
-            if (!strcasecmp(key,"min_train_size")) fprintf(stderr, "%s:%d: NOTE: 'min_train_size' is deprecated; use 'mcz.min_training_size'\n", path, ln);
-
-        } else if (strcasecmp(key, "mcz.min_size") == 0) {
-            int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad min_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+        } else if (strcasecmp(key, "min_comp_size") == 0) {
+            int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad min_comp_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.min_comp_size = (size_t)v;
 
-        } else if (strcasecmp(key, "mcz.max_size") == 0) {
-            int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad max_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+        } else if (strcasecmp(key, "max_comp_size") == 0) {
+            int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad max_comp_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.max_comp_size = (size_t)v;
 
-        } else if (strcasecmp(key, "mcz.dict_dir") == 0) {
+        } else if (strcasecmp(key, "dict_dir") == 0) {
             g_cfg.dict_dir = val && *val ? strdup(val) : NULL;
-            if (!strcasecmp(key,"dict_dir_path")) fprintf(stderr, "%s:%d: NOTE: 'dict_dir_path' is deprecated; use 'mcz.dict_dir'\n", path, ln);
 
-        } else if (strcasecmp(key, "mcz.enable_dict") == 0) {
-            bool b; if (parse_bool(val, &b)) { fprintf(stderr, "%s:%d: bad bool '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+        } else if (strcasecmp(key, "enable_dict") == 0) {
+            bool b; if (parse_bool(val, &b)) { fprintf(stderr, "%s:%d: bad enable_dict '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.enable_dict = b;
-        } else if (strcasecmp(key, "mcz.enable_comp") == 0) {
-            bool b; if (parse_bool(val, &b)) { fprintf(stderr, "%s:%d: bad bool '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+        } else if (strcasecmp(key, "enable_comp") == 0) {
+            bool b; if (parse_bool(val, &b)) { fprintf(stderr, "%s:%d: bad enable_comp '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.enable_comp = b;
-        } else if (strcasecmp(key, "mcz.enable_training") == 0) {
-            bool b; if (parse_bool(val, &b)) { fprintf(stderr, "%s:%d: bad bool '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+        } else if (strcasecmp(key, "enable_training") == 0) {
+            bool b; if (parse_bool(val, &b)) { fprintf(stderr, "%s:%d: bad enable_training '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.enable_training = b;
-        } else if (strcasecmp(key, "mcz.retraining_interval") == 0) {
+        } else if (strcasecmp(key, "retraining_interval") == 0) {
             int64_t s; if (parse_duration_sec(val, &s)) { fprintf(stderr, "%s:%d: bad retraining_interval '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.retraining_interval_s = s;
-        } else if (strcasecmp(key, "mcz.min_training_size") == 0) {
+        } else if (strcasecmp(key, "min_training_size") == 0) {
             int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad min_training_size '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.min_training_size = (size_t)v;
-        } else if (strcasecmp(key, "mcz.ewma_alpha") == 0) {
+        } else if (strcasecmp(key, "ewma_alpha") == 0) {
             double d; if (parse_frac(val, &d)) { fprintf(stderr, "%s:%d: bad ewma_alpha '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.ewma_alpha = d;
-        } else if (strcasecmp(key, "mcz.retrain_drop") == 0) {
+        } else if (strcasecmp(key, "retrain_drop") == 0) {
             double d; if (parse_frac(val, &d)) { fprintf(stderr, "%s:%d: bad retrain_drop '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.retrain_drop = d;
-        } else if (!strcasecmp(key, "mcz.train_mode")) {
+        } else if (!strcasecmp(key, "train_mode")) {
             mcz_train_mode_t mode;
             if(parse_train_mode(val, &mode)) { fprintf(stderr, "%s:%d: bad train_mode'%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue;}
             g_cfg.train_mode = mode;
-        } else if (strcasecmp(key, "mcz.gc_cool_period") == 0) {
+        } else if (strcasecmp(key, "gc_cool_period") == 0) {
             int64_t s; if (parse_duration_sec(val, &s)) { fprintf(stderr, "%s:%d: bad gc_cool_period '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.gc_cool_period = s;
-        } else if (strcasecmp(key, "mcz.gc_quarantine_period") == 0) {
+        } else if (strcasecmp(key, "gc_quarantine_period") == 0) {
                int64_t s; if (parse_duration_sec(val, &s)) { fprintf(stderr, "%s:%d: bad gc_quarantine_period '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.gc_quarantine_period = s;
         /* Retention */
-        } else if (strcasecmp(key, "mcz.dict_retain_max") == 0) {
+        } else if (strcasecmp(key, "dict_retain_max") == 0) {
             char *end; long v = strtol(val, &end, 10);
             if (val == end || *end || v < 1 || v > 256) { fprintf(stderr, "%s:%d: bad dict_retain_max '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.dict_retain_max = (int)v;
 
             /* Sampling + Spool */
-        } else if (strcasecmp(key, "mcz.enable_sampling") == 0) {
-            bool b; if (parse_bool(val, &b)) { fprintf(stderr, "%s:%d: bad bool '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
+        } else if (strcasecmp(key, "enable_sampling") == 0) {
+            bool b; if (parse_bool(val, &b)) { fprintf(stderr, "%s:%d: bad enable_sampling '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.enable_sampling = b;
-        } else if (strcasecmp(key, "mcz.sample_p") == 0) {
+        } else if (strcasecmp(key, "sample_p") == 0) {
             double d; if (parse_frac(val, &d)) { fprintf(stderr, "%s:%d: bad sample_p '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.sample_p = d;
-        } else if (strcasecmp(key, "mcz.sample_window_duration") == 0) {
+        } else if (strcasecmp(key, "sample_window_duration") == 0) {
             int64_t s; if (parse_duration_sec(val, &s)) { fprintf(stderr, "%s:%d: bad sample_window_duration '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.sample_window_duration = s;
-        } else if (strcasecmp(key, "mcz.spool_dir") == 0) {
+        } else if (strcasecmp(key, "spool_dir") == 0) {
             g_cfg.spool_dir = val && *val ? strdup(val) : NULL;
-        } else if (strcasecmp(key, "mcz.spool_max_bytes") == 0) {
+        } else if (strcasecmp(key, "spool_max_bytes") == 0) {
             int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad spool_max_bytes '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.spool_max_bytes = (size_t)v;
         } else if (strcasecmp(key, "compress_keys") == 0) {
@@ -358,7 +353,7 @@ int parse_mcz_config(const char *path)
         fprintf(stderr, "mcz: dictionary directory is not specified\n"); rc = rc?rc:-EINVAL; goto err;
     }
     if (g_cfg.spool_dir == NULL && g_cfg.enable_comp && g_cfg.enable_dict){
-        fprintf(stderr, "mcz: spoll directory is not specified\n"); rc = rc?rc:-EINVAL; goto err;
+        fprintf(stderr, "mcz: spool directory is not specified\n"); rc = rc?rc:-EINVAL; goto err;
     }
 
     return rc;      /* 0 if perfect, first fatal errno otherwise */
