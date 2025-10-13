@@ -18,34 +18,34 @@
  *
  * This file adds support for custom ASCII and binary protocol commands:
  *
- *   - "mcz stats [<namespace>|global|default] [json]"
+ *   - "mcdc stats [<namespace>|global|default] [json]"
  *       Dump statistics snapshots in text or JSON form.
  *
- *   - "mcz ns"
+ *   - "mcdc ns"
  *       List active namespaces, including "global" and "default".
  *
- *   - "mcz config [json]"
+ *   - "mcdc config [json]"
  *       Show current configuration, either as text lines or as a JSON object.
  *
- *   - "mcz sampler [start|stop|status]"
+ *   - "mcdc sampler [start|stop|status]"
  *       Sampler control (spooling data, incoming key-value pairs to a file
  *           for further analysis and dictionary creation).
- *   - "mcz reload [json]"
+ *   - "mcdc reload [json]"
  *       Reload dictionaries online
  *
- *   - PROTOCOL_BINARY_CMD_MCZ_STATS (0xE1)
- *       Binary version of "mcz stats".
+ *   - PROTOCOL_BINARY_CMD_MCDC_STATS (0xE1)
+ *       Binary version of "mcdc stats".
  *
- *   - PROTOCOL_BINARY_CMD_MCZ_NS (0xE2)
+ *   - PROTOCOL_BINARY_CMD_MCDC_NS (0xE2)
  *       Binary namespace listing.
  *
- *   - PROTOCOL_BINARY_CMD_MCZ_CFG (0xE3)
+ *   - PROTOCOL_BINARY_CMD_MCDC_CFG (0xE3)
  *       Binary configuration dump.
  *
- *   - PROTOCOL_BINARY_CMD_MCZ_SAMPLER (0xE4)
+ *   - PROTOCOL_BINARY_CMD_MCDC_SAMPLER (0xE4)
  *       Binary sampler.
  *
- *   - PROTOCOL_BINARY_CMD_MCZ_RELOAD (0xE5)
+ *   - PROTOCOL_BINARY_CMD_MCDC_RELOAD (0xE5)
  *       Reload dictionaries.
  *
  * Each handler builds the appropriate payload (text lines or JSON),
@@ -88,7 +88,7 @@ static const char *train_mode_str(mcz_train_mode_t m) {
 static inline const char *b2s(bool v) { return v ? "true" : "false"; }
 
 
-/* ---------- mcz sampler status ---------- */
+/* ---------- mcdc sampler status ---------- */
 static int sampler_status_ascii(char *buf, size_t cap, mcz_sampler_status_t *st) {
     int n = snprintf(buf, cap,
         "MCDC-SAMPLER configured %s\r\n"
@@ -145,13 +145,13 @@ static int build_sampler_status(char **outp, size_t *lenp, int json) {
     return 0;
 }
 
-/* ---------- ASCII: mcz sampler ... ---------- */
+/* ---------- ASCII: mcdc sampler ... ---------- */
 static void handle_mcz_sampler_ascii(conn *c, token_t *tokens, size_t ntokens) {
-    if (ntokens < 4 || ntokens > 5) { out_string(c, "CLIENT_ERROR usage: mcz sampler <start|stop|status> [json]"); return; }
+    if (ntokens < 4 || ntokens > 5) { out_string(c, "CLIENT_ERROR usage: mcdc sampler <start|stop|status> [json]"); return; }
     const char *verb = tokens[COMMAND_TOKEN + 2].value;
 
     if (strcmp(verb, "start") == 0) {
-        if (ntokens != 4) { out_string(c, "CLIENT_ERROR usage: mcz sampler <start|stop|status> [json]"); return; }
+        if (ntokens != 4) { out_string(c, "CLIENT_ERROR usage: mcdc sampler <start|stop|status> [json]"); return; }
         int rc = mcz_sampler_start();
         if (rc == 0) {
             out_string(c, "STARTED\r\n");
@@ -164,7 +164,7 @@ static void handle_mcz_sampler_ascii(conn *c, token_t *tokens, size_t ntokens) {
         }
         return;
     } else if (strcmp(verb, "stop") == 0) {
-        if (ntokens != 4) { out_string(c, "CLIENT_ERROR usage: mcz sampler <start|stop|status> [json]"); return; }
+        if (ntokens != 4) { out_string(c, "CLIENT_ERROR usage: mcdc sampler <start|stop|status> [json]"); return; }
 
         int rc = mcz_sampler_stop();
         if (rc == 0) {
@@ -183,7 +183,7 @@ static void handle_mcz_sampler_ascii(conn *c, token_t *tokens, size_t ntokens) {
             strcmp(tokens[COMMAND_TOKEN + 3].value, "json") == 0) {
             want_json = 1;
         } else if (ntokens == 5){
-            out_string(c, "CLIENT_ERROR usage: mcz sampler <start|stop|status> [json]");
+            out_string(c, "CLIENT_ERROR usage: mcdc sampler <start|stop|status> [json]");
             return;
         }
         char *payload = NULL; size_t plen = 0;
@@ -193,10 +193,10 @@ static void handle_mcz_sampler_ascii(conn *c, token_t *tokens, size_t ntokens) {
         return;
     }
 
-    out_string(c, "CLIENT_ERROR usage: mcz sampler <start|stop|status> [json]");
+    out_string(c, "CLIENT_ERROR usage: mcdc sampler <start|stop|status> [json]");
 }
 
-/* Binary protocol impelementation of "mcz sampler ..." */
+/* Binary protocol impelementation of "mcdc sampler ..." */
 
 void process_mcz_sampler_bin(conn *c)
 {
@@ -225,7 +225,7 @@ void process_mcz_sampler_bin(conn *c)
     protocol_binary_response_header h;
     memset(&h, 0, sizeof(h));
     h.response.magic    = PROTOCOL_BINARY_RES;
-    h.response.opcode   = PROTOCOL_BINARY_CMD_MCZ_SAMPLER;
+    h.response.opcode   = PROTOCOL_BINARY_CMD_MCDC_SAMPLER;
     h.response.keylen   = 0;
     h.response.extlen   = 0;
     h.response.datatype = PROTOCOL_BINARY_RAW_BYTES;
@@ -285,7 +285,7 @@ void process_mcz_sampler_bin(conn *c)
 }
 
 
-/* ----------  mcz reload ... ------------*/
+/* ----------  mcdc reload ... ------------*/
 
 static int reload_status_ascii(char *buf, size_t cap, mcz_reload_status_t *st) {
     int n;
@@ -393,7 +393,7 @@ static int build_reload_status(char **outp, size_t *lenp, int json) {
     return 0;
 }
 
-/* Binary protocol implementation "mcz reload"*/
+/* Binary protocol implementation "mcdc reload"*/
 
 void process_mcz_reload_bin(conn *c)
 {
@@ -426,7 +426,7 @@ void process_mcz_reload_bin(conn *c)
     protocol_binary_response_header h;
     memset(&h, 0, sizeof(h));
     h.response.magic    = PROTOCOL_BINARY_RES;
-    h.response.opcode   = PROTOCOL_BINARY_CMD_MCZ_RELOAD;   /* 0xE5 */
+    h.response.opcode   = PROTOCOL_BINARY_CMD_MCDC_RELOAD;   /* 0xE5 */
     h.response.keylen   = 0;
     h.response.extlen   = 0;
     h.response.datatype = PROTOCOL_BINARY_RAW_BYTES;
@@ -442,12 +442,9 @@ void process_mcz_reload_bin(conn *c)
     write_and_free(c, resp, (int)total);
 }
 
-/* ---------- JSON builder: compact JSON ---------- */
 static int cfg_ascii(char *buf, size_t cap, mcz_cfg_t *c) {
     if (!c) return -1;
 
-    /* crude escape: assume paths don’t contain embedded quotes/newlines;
-     if they might, add a tiny JSON-escape helper. */
     const char *dict_dir = c->dict_dir ? c->dict_dir : "";
     const char *spool_dir= c->spool_dir ? c->spool_dir : "";
 
@@ -501,7 +498,7 @@ static int cfg_ascii(char *buf, size_t cap, mcz_cfg_t *c) {
     return n;
 }
 
-/* (Binary uses this JSON as the value; ASCII can request it via 'mcz config json') */
+/* (Binary uses this JSON as the value; ASCII can request it via 'mcdc config json') */
 static int cfg_json(char *buf, size_t cap, mcz_cfg_t *c) {
     if (!c) return -1;
 
@@ -583,7 +580,7 @@ static int build_cfg(char **outp, size_t *lenp, int json) {
     return 0;
 }
 
-/* Binary implementation  of "mcz config" */
+/* Binary implementation  of "mcdc config" */
 
 void process_mcz_cfg_bin(conn *c)
 {
@@ -615,7 +612,7 @@ void process_mcz_cfg_bin(conn *c)
     protocol_binary_response_header h;
     memset(&h, 0, sizeof(h));
     h.response.magic    = PROTOCOL_BINARY_RES;
-    h.response.opcode   = PROTOCOL_BINARY_CMD_MCZ_CFG;   /* 0xE3 */
+    h.response.opcode   = PROTOCOL_BINARY_CMD_MCDC_CFG;   /* 0xE3 */
     h.response.keylen   = 0;
     h.response.extlen   = 0;
     h.response.datatype = PROTOCOL_BINARY_RAW_BYTES;
@@ -631,7 +628,7 @@ void process_mcz_cfg_bin(conn *c)
     write_and_free(c, resp, (int)total);
 }
 
-/*    mcz stats ... */
+/*    mcdc stats ... */
 
 static int build_stats_ascii(char **outp, size_t *lenp,
                                 const char *ns, const mcz_stats_snapshot_t *s)
@@ -762,7 +759,7 @@ static int build_stats_json(char **outp, size_t *lenp,
     return 0;
 }
 
-/* Binary protocol implementation of "mcz stats ..." command */
+/* Binary protocol implementation of "mcdc stats ..." command */
 void process_mcz_stats_bin(conn *c)
 {
     const protocol_binary_request_header *req = &c->binary_header;
@@ -820,7 +817,7 @@ void process_mcz_stats_bin(conn *c)
     protocol_binary_response_header h;
     memset(&h, 0, sizeof(h));
     h.response.magic    = PROTOCOL_BINARY_RES;
-    h.response.opcode   = PROTOCOL_BINARY_CMD_MCZ_STATS;      /* 0xE1 */
+    h.response.opcode   = PROTOCOL_BINARY_CMD_MCDC_STATS;      /* 0xE1 */
     h.response.keylen   = htons(0);
     h.response.extlen   = 0;
     h.response.datatype = PROTOCOL_BINARY_RAW_BYTES;
@@ -919,7 +916,7 @@ static int build_ns_text_value(char **outp, size_t *lenp) {
     return 0;
 }
 
-/* Binary protocol impelementation of "mcz ns" command */
+/* Binary protocol impelementation of "mcdc ns" command */
 void process_mcz_ns_bin(conn *c)
 {
     const protocol_binary_request_header *req = &c->binary_header;
@@ -948,7 +945,7 @@ void process_mcz_ns_bin(conn *c)
     protocol_binary_response_header h;
     memset(&h, 0, sizeof(h));
     h.response.magic    = PROTOCOL_BINARY_RES;
-    h.response.opcode   = PROTOCOL_BINARY_CMD_MCZ_NS;
+    h.response.opcode   = PROTOCOL_BINARY_CMD_MCDC_NS;
     h.response.keylen   = 0;
     h.response.extlen   = 0;
     h.response.datatype = PROTOCOL_BINARY_RAW_BYTES;
@@ -969,7 +966,7 @@ void process_mcz_ns_bin(conn *c)
 void process_mcz_command_ascii(conn *c, token_t *tokens, const size_t ntokens)
 {
 
-    if (ntokens < 3 || strcmp(tokens[COMMAND_TOKEN].value, "mcz") != 0) {
+    if (ntokens < 3 || strcmp(tokens[COMMAND_TOKEN].value, "mcdc") != 0) {
         out_string(c, "CLIENT_ERROR bad command");
         return;
     }
