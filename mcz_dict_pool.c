@@ -56,7 +56,7 @@ static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static pool_entry_t   *g_head = NULL;
 
 char *make_key_from_meta(const mcz_dict_meta_t *m) {
-    /* Prefer a strong identity if you have it (signature),
+    /* Prefer a strong identity if we have it (signature),
        otherwise fall back to absolute dict_path. */
     if (m->signature && *m->signature) return strdup(m->signature);
     if (m->dict_path && *m->dict_path) return strdup(m->dict_path);

@@ -373,7 +373,6 @@ mcz_stats_lookup_by_ns(const char *nsp, size_t nsp_sz)
 
     atomic_fetch_add_explicit(&t->refcnt, 1, memory_order_acq_rel);
 
-    /* Find longest matching namespace prefix */
     mcz_stats_atomic_t *found = NULL;
 
     for (size_t i = 0; i < t->nbuckets; ++i) {
@@ -478,7 +477,7 @@ int mcz_stats_rebuild_from_list(const char **names, size_t N, size_t nbuckets_ne
         nanosleep(&ts, NULL);
     }
 
-    /* Option A policy:
+    /*
        Do NOT free stats for namespaces that disappeared.
        We intentionally allow tiny leaks to keep lookups lock-free & simple. */
 

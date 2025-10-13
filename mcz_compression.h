@@ -50,22 +50,7 @@
 extern "C" {
 #endif
 
-/* ---------- portable atomic_uintptr_t --------------------------------- */
-#if defined(__STDC_NO_ATOMICS__)
-/* compiler has no C11 atomics at all */
-typedef volatile uintptr_t  atomic_uintptr_t;
-#   define atomic_load_explicit(p,o)          (*(p))
-#   define atomic_store_explicit(p,v,o)       (*(p) = (v))
-#   define atomic_exchange_explicit(p,v,o)    (__sync_lock_test_and_set((p),(v)))
 
-#elif !defined(atomic_uintptr_t)
-/* compiler supports C11 atomics, but typedef may be missing       */
-#ifndef __CDT_PARSER__          /* <-- hide from Eclipse indexer */
-typedef _Atomic uintptr_t  atomic_uintptr_t;
-#else                           /* CDT fallback: no _Atomic keyword */
-typedef uintptr_t atomic_uintptr_t;
-#endif
-#endif
 
 /* ---------- sample node ------------------------------------------------ */
 typedef struct sample_node_s {
@@ -107,8 +92,8 @@ typedef struct tls_cache_s {
 typedef struct mcz_reload_status_s {
     int       rc;            /* 0 = success, <0 = error */
     uint32_t  namespaces;
-    uint32_t  dicts_new;
     uint32_t  dicts_loaded;
+    uint32_t  dicts_new;
     uint32_t  dicts_reused;
     uint32_t  dicts_retired;
     uint32_t  dicts_failed;

@@ -70,7 +70,7 @@ void mcz_eff_configure(const mcz_train_cfg_t *cfg)
     /* publish */
     g_cfg_set = true;
 
-    /* Also cache alpha for hot path (no synchronization needed per your constraint) */
+    /* Also cache alpha for hot path (no synchronization needed) */
     g_eff.alpha = g_cfg.ewma_alpha;
 }
 

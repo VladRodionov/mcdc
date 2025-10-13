@@ -18,7 +18,7 @@
  *
  * Single-consumer spooler with an internal MPSC stack and background thread.
  * The thread writes records to <spool_dir>/mcz_samples_YYYYMMDD_HHMMSS.bin
- * until 'spool_max_bytes' is reached, then flips 'g_running' flag to false and stops.
+ * until 'spool_max_bytes' is reached or sampling window expired, then flips 'g_running' flag to false and stops.
  */
 
 #define _GNU_SOURCE

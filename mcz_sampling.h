@@ -59,7 +59,7 @@ int mcz_sampler_init(const char *spool_dir,
                      int sample_window_sec,
                      size_t spool_max_bytes);
 
-/* Start/stop background thread explicitly (optional; enable(true) also starts). */
+/* Start/stop background thread explicitly. */
 int  mcz_sampler_start(void);
 int mcz_sampler_stop(void);
 

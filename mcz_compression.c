@@ -240,7 +240,6 @@ static int mcz_load_dicts(void) {
     if (tab) {
         atomic_store_explicit(&ctx->dict_table, (uintptr_t)tab, memory_order_release);
         build_reload_status(tab, NULL, st);
-        //TODO: change to 1
         if(settings.verbose > 1) {
             reload_status_dump(st);
         }
@@ -987,7 +986,6 @@ mcz_reload_status_t *mcz_reload_dictionaries(void)
     mcz_table_t *oldtab = (mcz_table_t*)atomic_load_explicit(&ctx->dict_table, memory_order_acquire);
     mcz_publish_table(newtab);
     build_reload_status(newtab, oldtab, st);
-    //TODO: change to 1
     if(settings.verbose > 1) {
         reload_status_dump(st);
     }

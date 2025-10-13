@@ -76,7 +76,7 @@ void mcz_eff_configure(const mcz_train_cfg_t *cfg);
 /* Optional: copy out the current config */
 void mcz_eff_get_config(mcz_train_cfg_t *out_cfg);
 
-/* --- Lifecycle & operations (no cfg args on hot path) --- */
+/* --- Lifecycle & operations  --- */
 void mcz_eff_init(uint64_t now_s);
 
 void mcz_eff_on_observation(size_t original_bytes,

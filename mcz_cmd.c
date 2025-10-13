@@ -331,36 +331,36 @@ static int reload_status_json(char *buf, size_t cap, mcz_reload_status_t *st) {
     if (st->rc == 0) {
         n = snprintf(buf, cap,
             "{\r\n"
-            "\"status\": \"OK\"\r\n"
-            "\"ns\": %u\r\n"
-            "\"dicts_loaded\": %u\r\n"
-            "\"dicts_new\": %u\r\n"
-            "\"dicts_reused\": %u\r\n"
+            "\"status\": \"OK\",\r\n"
+            "\"ns\": %u,\r\n"
+            "\"dicts_loaded\": %u,\r\n"
+            "\"dicts_new\": %u,\r\n"
+            "\"dicts_reused\": %u,\r\n"
             "\"dicts_failed\": %u\r\n"
             "}\r\n",
             st->namespaces, st->dicts_loaded, st->dicts_new, st->dicts_reused, st->dicts_failed);
     } else if (st->err[0]) {
         n = snprintf(buf, cap,
             "{\r\n"
-            "\"status\": \"ERR\"\r\n"
-            "\"rc\": %d\r\n"
-            "\"msg\": \"%s\"\r\n"
-            "\"ns\": %u\r\n"
-            "\"dicts_loaded\": %u\r\n"
-            "\"dicts_new\": %u\r\n"
-            "\"dicts_reused\": %u\r\n"
+            "\"status\": \"ERR\",\r\n"
+            "\"rc\": %d,\r\n"
+            "\"msg\": \"%s\",\r\n"
+            "\"ns\": %u,\r\n"
+            "\"dicts_loaded\": %u,\r\n"
+            "\"dicts_new\": %u,\r\n"
+            "\"dicts_reused\": %u,\r\n"
             "\"dicts_failed\": %u\r\n"
             "}\r\n",
             st->rc, st->err, st->namespaces, st->dicts_loaded, st->dicts_new, st->dicts_reused, st->dicts_failed);
     } else {
         n = snprintf(buf, cap,
             "{\r\n"
-            "\"status\": \"ERR\"\r\n"
-            "\"rc\": %d\r\n"
-            "\"ns\": %u\r\n"
-            "\"dicts_loaded\": %u\r\n"
-            "\"dicts_new\": %u\r\n"
-            "\"dicts_reused\": %u\r\n"
+            "\"status\": \"ERR\",\r\n"
+            "\"rc\": %d,\r\n"
+            "\"ns\": %u,\r\n"
+            "\"dicts_loaded\": %u,\r\n"
+            "\"dicts_new\": %u,\r\n"
+            "\"dicts_reused\": %u,\r\n"
             "\"dicts_failed\": %u\r\n"
             "}\r\n",
             st->rc, st->namespaces, st->dicts_loaded, st->dicts_new, st->dicts_reused, st->dicts_failed);
@@ -461,7 +461,7 @@ static int cfg_ascii(char *buf, size_t cap, mcz_cfg_t *c) {
             "MCDC-CFG retraining_interval_s %" PRId64 "\r\n"
             "MCDC-CFG min_training_size %zu \r\n"
             "MCDC-CFG ewma_alpha %.6f\r\n"
-            "MCDC-CFG retrain_drop %.6f,\r\n"
+            "MCDC-CFG retrain_drop %.6f\r\n"
             "MCDC-CFG train_mode %s\r\n"
             "MCDC-CFG gc_cool_period %d\r\n"
             "MCDC-CFG gc_quarantine_period %d\r\n"

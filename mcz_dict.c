@@ -263,14 +263,6 @@ static int mcz_save_dict_file(const char *dir,
     return 0;
 }
 
-/* -------------------------
- * Part 2: write <dir>/<uuid>.mf
- *   - prefixes may be NULL/0 => "default"
- *   - signature optional (may be NULL/empty)
- *   - created: pass 0 to use current time
- * ------------------------- */
-
-
 /* Build "a, b, c" or "default" if none. Caller must free(). */
 static char *build_ns_line(const char * const *prefixes, size_t nprefixes) {
     if (!prefixes || nprefixes == 0) return strdup("default");
@@ -285,6 +277,13 @@ static char *build_ns_line(const char * const *prefixes, size_t nprefixes) {
     }
     return s;
 }
+
+/* -------------------------
+ * Part 2: write <dir>/<uuid>.mf
+ *   - prefixes may be NULL/0 => "default"
+ *   - signature optional (may be NULL/empty)
+ *   - created: pass 0 to use current time
+ * ------------------------- */
 
 /* Renders manifest text */
 static int render_manifest_text(const char *dict_basename,

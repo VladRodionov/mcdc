@@ -16,7 +16,7 @@
 /*
  * mcz_stats.h
  *
- * Statistics subsystem for Memcarrot (mcz).
+ * Statistics subsystem for MC/DC (Memcached with Dictionary Compression).
  *
  * Responsibilities:
  *   - Define atomic counters for tracking cache and compression metrics.
@@ -51,7 +51,7 @@ typedef struct {
     _Atomic uint64_t reads_total;
 
 
-    // shadow
+    // shadow (not implemented yet)
     _Atomic uint64_t shadow_samples;
     _Atomic uint64_t shadow_raw_total;
     _Atomic int64_t  shadow_saved_bytes; // bytes_saved_candidate - bytes_saved_primary
@@ -126,7 +126,7 @@ mcz_stats_atomic_t *mcz_stats_default(void);
 void mcz_stats_add_io(mcz_stats_atomic_t* s, uint64_t raw, uint64_t cmp);
 void mcz_stats_inc_err(mcz_stats_atomic_t* s, const char* kind);
 
-// snapshot fill (pulls scalars from your detector & ratio window)
+// snapshot fill
 void mcz_stats_snapshot_fill(mcz_stats_atomic_t* s,
                              mcz_stats_snapshot_t* out);
 
