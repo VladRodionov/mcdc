@@ -582,7 +582,7 @@ struct settings {
     uint32_t sock_cookie_id;
 #endif
 #ifdef USE_ZSTD
-    bool disable_comp;
+    bool mcdc_disabled;
 #endif
 
 };

@@ -522,17 +522,18 @@ static int mcz_start_trainer(mcz_ctx_t *ctx){
 /* ---------- public init / destroy ----------------------------------- */
 int mcz_init(void) {
     mcz_init_default_config();
-    mcz_config_sanity_check();
     attach_cfg();
 
     mcz_ctx_t *ctx = mcz_ctx_mut();
     if (!ctx)
         return -ENOMEM;
     /* override from global settings*/
-    if (settings.disable_comp){
+    if (settings.mcdc_disabled){
         ctx->cfg->enable_comp = false;
         return 0;
     }
+    mcz_config_sanity_check();
+
     if (!ctx->cfg->enable_comp){
         return 0;
     }

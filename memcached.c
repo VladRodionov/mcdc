@@ -279,7 +279,7 @@ static void settings_init(void) {
     settings.sock_cookie_id = 0;
 #endif
 #ifdef USE_ZSTD
-    settings.disable_comp = false;
+    settings.mcdc_disabled = false;
 #endif
 
 }
@@ -4882,7 +4882,7 @@ int main (int argc, char **argv) {
         COOKIE_ID,
 #endif
 #ifdef USE_ZSTD
-        DISABLE_COMP
+        MCDC_DISABLED
 #endif
     };
     char *const subopts_tokens[] = {
@@ -4949,7 +4949,7 @@ int main (int argc, char **argv) {
         [COOKIE_ID] = "sock_cookie_id",
 #endif
 #ifdef USE_ZSTD
-        [DISABLE_COMP] = "disable_comp",
+        [MCDC_DISABLED] = "mcdc_disabled",
 #endif
         NULL
     };
@@ -5721,8 +5721,8 @@ int main (int argc, char **argv) {
                 break;
 #endif
 #ifdef USE_ZSTD
-                case DISABLE_COMP:
-                    settings.disable_comp = true;
+                case MCDC_DISABLED:
+                    settings.mcdc_disabled = true;
                     break;
 #endif
             default:

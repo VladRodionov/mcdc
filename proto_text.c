@@ -2925,7 +2925,7 @@ void process_command_ascii(conn *c, char *command) {
         return;
     }
 #ifdef USE_ZSTD
-    if (ntokens >= 2 && strcmp(tokens[COMMAND_TOKEN].value, "mcz") == 0) {
+    if (ntokens >= 2 && strcmp(tokens[COMMAND_TOKEN].value, "mcdc") == 0) {
         process_mcz_command_ascii(c, tokens, ntokens);
         return;
     }

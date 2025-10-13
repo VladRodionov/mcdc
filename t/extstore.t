@@ -27,7 +27,7 @@ eval {
 };
 ok($@, "failed to start server with invalid path size");
 
-my $server = new_memcached("-m 64 -U 0 -o disable_comp,ext_page_size=8,ext_wbuf_size=2,ext_threads=1,ext_io_depth=2,ext_item_size=512,ext_item_age=2,ext_recache_rate=10000,ext_max_frag=0.9,ext_path=$ext_path:64m,slab_automove=0,ext_compact_under=1,ext_max_sleep=100000");
+my $server = new_memcached("-m 64 -U 0 -o mcdc_disabled,ext_page_size=8,ext_wbuf_size=2,ext_threads=1,ext_io_depth=2,ext_item_size=512,ext_item_age=2,ext_recache_rate=10000,ext_max_frag=0.9,ext_path=$ext_path:64m,slab_automove=0,ext_compact_under=1,ext_max_sleep=100000");
 my $sock = $server->sock;
 
 eval {

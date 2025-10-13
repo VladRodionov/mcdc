@@ -1077,19 +1077,19 @@ static void dispatch_bin_command(conn *c, char *extbuf) {
             }
             break;
 #ifdef USE_ZSTD
-        case PROTOCOL_BINARY_CMD_MCZ_STATS:
+        case PROTOCOL_BINARY_CMD_MCDC_STATS:
             process_mcz_stats_bin(c);
             break;
-        case PROTOCOL_BINARY_CMD_MCZ_NS:
+        case PROTOCOL_BINARY_CMD_MCDC_NS:
             process_mcz_ns_bin(c);
             break;
-        case PROTOCOL_BINARY_CMD_MCZ_CFG:
+        case PROTOCOL_BINARY_CMD_MCDC_CFG:
             process_mcz_cfg_bin(c);
             break;
-        case PROTOCOL_BINARY_CMD_MCZ_SAMPLER:
+        case PROTOCOL_BINARY_CMD_MCDC_SAMPLER:
             process_mcz_sampler_bin(c);
             break;
-        case PROTOCOL_BINARY_CMD_MCZ_RELOAD:
+        case PROTOCOL_BINARY_CMD_MCDC_RELOAD:
             process_mcz_reload_bin(c);
             break;
 #endif
