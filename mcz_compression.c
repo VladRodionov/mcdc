@@ -31,7 +31,7 @@
  */
 #include "mcz_compression.h"
 #define ZDICT_STATIC_LINKING_ONLY
-
+#include <unistd.h> 
 #include <pthread.h>
 #include <stdio.h>          /* FILE, fopen, fread, fclose */
 #include <stdlib.h>
@@ -330,7 +330,7 @@ static void* trainer_main(void *arg) {
     time_t started = time(NULL);
 
     for (;;) {
-        usleep(1000000); // 1000 ms
+        sleep_ms(1000); // 1000 ms
 
         bool need_training = false;
         bool success = false;
@@ -496,6 +496,7 @@ static void* trainer_main(void *arg) {
     }
 
     /* never reached */
+    return NULL;
 }
 
 static int mcz_start_trainer(mcz_ctx_t *ctx){
@@ -601,8 +602,6 @@ void mcz_destroy(void) {
     mcz_stats_registry_global_destroy();
     mcz_dict_pool_shutdown();
     mcz_gc_stop(ctx);
-
-    free(ctx);
 
 }
 
@@ -817,7 +816,7 @@ ssize_t mcz_maybe_compress(const void *src, size_t src_sz, const void *key, size
                                    src, src_sz, ctx->cfg->zstd_level);
     if (ZSTD_isError(csz)) {
         atomic_inc64(&stats->compress_errs, 1);
-        return -(ssize_t)ZSTD_getErrorCode(csz);
+        return -1;
     }
     /* 4. report 'eff' statistics - only for "default" namespace*/
     int rc;
@@ -871,7 +870,7 @@ ssize_t mcz_decompress(const void *src,
     }
 
     if (ZSTD_isError(out_sz))
-        return -(ssize_t)ZSTD_getErrorCode(out_sz);   /* correct sign */
+        return -1;   /* correct sign */
 
     if (out_sz > dst_sz)
         return -EOVERFLOW;                            /* caller too small */
@@ -919,7 +918,7 @@ ssize_t mcz_maybe_decompress(const item *it, mc_resp    *resp) {
 
     size_t expect = ZSTD_getFrameContentSize(src, compLen);
     if (expect == ZSTD_CONTENTSIZE_ERROR){
-        fprintf(stderr, "[mcz] decompress: corrupt frame (tid=%llu, id=%u, compLen=%zu, start=%llu)\n",
+        fprintf(stderr, "[mcz] decompress: corrupt frame (tid=%llu, id=%u, compLen=%zu, start=%lu)\n",
                cur_tid(), did, compLen, *(uint64_t *)src);
         if(stats) atomic_inc64(&stats->decompress_errs, 1);
         return -EINVAL;
@@ -970,6 +969,7 @@ static void mcz_publish_table(mcz_table_t *tab) {
 mcz_reload_status_t *mcz_reload_dictionaries(void)
 {
     mcz_ctx_t *ctx = mcz_ctx_mut();
+    if (!ctx->cfg->enable_dict) return NULL;
     const char *dir = ctx->cfg->dict_dir;
     char *err = NULL;
     mcz_reload_status_t *st = calloc(1, sizeof(*st));

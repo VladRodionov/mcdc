@@ -44,6 +44,8 @@ extern "C" {
  * set_err() with free().
  */
 
+void sleep_ms(unsigned ms);
+
 void set_err(char **err_out, const char *fmt, ...);
 
 void format_rfc3339_utc(time_t t, char out[32]);

@@ -281,7 +281,7 @@ static void _storage_get_item_cb(void *e, obj_io *io, int ret) {
         size_t      compLen = read_it->nbytes;
         size_t expect = ZSTD_getFrameContentSize(src, compLen);
         if (expect == ZSTD_CONTENTSIZE_ERROR || expect == ZSTD_CONTENTSIZE_UNKNOWN){
-            fprintf(stderr, "[mcz] decompress: corrupt frame (id=%u, compLen=%zu, start=%llu)\n",
+            fprintf(stderr, "[mcz] decompress: corrupt frame (id=%u, compLen=%zu, start=%lu)\n",
                     did, compLen, *(uint64_t *)src);
             mcz_report_decomp_err(ITEM_key(read_it), read_it->nkey);
             miss = true;

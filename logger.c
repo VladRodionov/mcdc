@@ -7,7 +7,7 @@
 #include <errno.h>
 #include <poll.h>
 #include <stdarg.h>
-
+#include <time.h>
 #if defined(__sun)
 #include <atomic.h>
 #endif
@@ -898,9 +898,18 @@ static void logger_thread_flush_stats(struct logger_stats *ls) {
 #define MAX_LOGGER_SLEEP 1000000
 #define MIN_LOGGER_SLEEP 1000
 
+static void sleep_us(uint64_t us) {
+    struct timespec ts;
+    ts.tv_sec  = (time_t)(us / 1000000ULL);
+    ts.tv_nsec = (long)((us % 1000000ULL) * 1000ULL);
+    while (nanosleep(&ts, &ts) == -1 && errno == EINTR) {
+        /* retry with remaining time */
+    }
+}
+
 /* Primary logger thread routine */
 static void *logger_thread(void *arg) {
-    useconds_t to_sleep = MIN_LOGGER_SLEEP;
+    uint64_t to_sleep = MIN_LOGGER_SLEEP;
     L_DEBUG("LOGGER: Starting logger thread\n");
     // TODO: If we ever have item references in the logger code, will need to
     // ensure everything is dequeued before stopping the thread.
@@ -912,7 +921,7 @@ static void *logger_thread(void *arg) {
 
         /* only sleep if we're *above* the minimum */
         if (to_sleep > MIN_LOGGER_SLEEP)
-            usleep(to_sleep);
+            sleep_us(to_sleep);
 
         /* Call function to iterate each logger. */
         pthread_mutex_lock(&logger_stack_lock);

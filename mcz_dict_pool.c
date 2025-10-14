@@ -35,6 +35,13 @@
  * Naming convention:
  *   - All functions/types prefixed with `mcz_dict_pool_*` belong here.
  */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1   // for O_CLOEXEC on glibc + some GNU bits
+#endif
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L  // for setenv(), unsetenv(), realpath(), etc.
+#endif
+
 #include "mcz_dict_pool.h"
 #include "mcz_utils.h"
 #include <pthread.h>

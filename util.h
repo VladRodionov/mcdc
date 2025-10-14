@@ -1,4 +1,5 @@
 #include "config.h"
+#include <time.h>   /* <-- needed for struct timespec */
 
 /* fast-enough functions for uriencoding strings. */
 void uriencode_init(void);

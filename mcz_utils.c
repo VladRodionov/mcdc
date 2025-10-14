@@ -30,6 +30,13 @@
  *   - Intended for small, reusable building blocks.
  *   - All helpers prefixed with `mcz_` for consistency.
  */
+// Feature-test macros (must be before any #include)
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1   // for O_CLOEXEC on glibc + some GNU bits
+#endif
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L  // for setenv(), unsetenv(), realpath(), etc.
+#endif
 #include "mcz_utils.h"
 
 #include <errno.h>
@@ -42,9 +49,20 @@
 #include <stdint.h>
 #include <stdatomic.h>
 #include <sys/time.h>
+#include <time.h>
+
+#include <limits.h>     // PATH_MAX (may be undefined; we handle fallback)
+#include <sys/stat.h>   // fstat
+#include <sys/types.h>
+#include <dirent.h>     // DIR, opendir, dirfd, closedir
 
 // Thread-local state (must be seeded once per thread)
 static __thread uint32_t rnd_state = 2463534242u; // arbitrary nonzero seed
+
+void sleep_ms(unsigned ms) {
+    struct timespec ts = { .tv_sec = ms / 1000, .tv_nsec = (long)(ms % 1000) * 1000000L };
+    while (nanosleep(&ts, &ts) == -1 && errno == EINTR) { /* retry */ }
+}
 
 uint32_t fast_rand32(void) {
     uint32_t x = rnd_state;
