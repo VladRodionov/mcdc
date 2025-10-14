@@ -628,7 +628,7 @@ static void sample_for_training(const void *key, size_t klen, const void *src, s
     }
 
     /* Check if default namespace for this key*/
-    if (!mcz_is_default_ns(tab, key, klen)){
+    if (tab && !mcz_is_default_ns(tab, key, klen)){
         return;
     }
 
