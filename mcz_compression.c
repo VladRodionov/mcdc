@@ -31,7 +31,7 @@
  */
 #include "mcz_compression.h"
 #define ZDICT_STATIC_LINKING_ONLY
-#include <unistd.h> 
+#include <unistd.h>
 #include <pthread.h>
 #include <stdio.h>          /* FILE, fopen, fread, fclose */
 #include <stdlib.h>
