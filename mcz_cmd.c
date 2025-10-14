@@ -16,7 +16,7 @@
 /*
  * mcz_cmd.c - Implementation of MCZ command extensions for memcached.
  *
- * This file adds support for custom ASCII and binary protocol commands:
+ * This file adds support for custom ASCII commands:
  *
  *   - "mcdc stats [<namespace>|global|default] [json]"
  *       Dump statistics snapshots in text or JSON form.
@@ -32,21 +32,6 @@
  *           for further analysis and dictionary creation).
  *   - "mcdc reload [json]"
  *       Reload dictionaries online
- *
- *   - PROTOCOL_BINARY_CMD_MCDC_STATS (0xE1)
- *       Binary version of "mcdc stats".
- *
- *   - PROTOCOL_BINARY_CMD_MCDC_NS (0xE2)
- *       Binary namespace listing.
- *
- *   - PROTOCOL_BINARY_CMD_MCDC_CFG (0xE3)
- *       Binary configuration dump.
- *
- *   - PROTOCOL_BINARY_CMD_MCDC_SAMPLER (0xE4)
- *       Binary sampler.
- *
- *   - PROTOCOL_BINARY_CMD_MCDC_RELOAD (0xE5)
- *       Reload dictionaries.
  *
  * Each handler builds the appropriate payload (text lines or JSON),
  * attaches it to a memcached response, and writes it back through
@@ -196,95 +181,6 @@ static void handle_mcz_sampler_ascii(conn *c, token_t *tokens, size_t ntokens) {
     out_string(c, "CLIENT_ERROR usage: mcdc sampler <start|stop|status> [json]");
 }
 
-/* Binary protocol impelementation of "mcdc sampler ..." */
-
-void process_mcz_sampler_bin(conn *c)
-{
-    const protocol_binary_request_header *req = &c->binary_header;
-
-    uint8_t  extlen  = req->request.extlen;
-    uint16_t keylen  = req->request.keylen;
-    uint32_t bodylen = req->request.bodylen;
-
-    if (extlen != 0 || keylen == 0 || bodylen != keylen) {
-        write_bin_error(c, PROTOCOL_BINARY_RESPONSE_EINVAL, NULL, 0);
-        return;
-    }
-
-    /* Key is the action */
-    size_t alen = (size_t)keylen;
-    /* Body in rbuf immediately follows the 24-byte header */
-    const char *body = (const char *)c->rbuf + sizeof(protocol_binary_request_header);
-    const char *action    = body + extlen;      /* start of key */
-    /* Normalize action into a C string (stack buffer) */
-    char act[16];
-    size_t n = (alen < sizeof(act)-1) ? alen : (sizeof(act)-1);
-    memcpy(act, action, n);
-    act[n] = '\0';
-
-    protocol_binary_response_header h;
-    memset(&h, 0, sizeof(h));
-    h.response.magic    = PROTOCOL_BINARY_RES;
-    h.response.opcode   = PROTOCOL_BINARY_CMD_MCDC_SAMPLER;
-    h.response.keylen   = 0;
-    h.response.extlen   = 0;
-    h.response.datatype = PROTOCOL_BINARY_RAW_BYTES;
-    h.response.status   = PROTOCOL_BINARY_RESPONSE_SUCCESS;
-    h.response.opaque   = req->request.opaque;
-    h.response.cas      = 0;
-
-    if (strcmp(act, "start") == 0) {
-        int rc = mcz_sampler_start();
-        const char *msg = (rc == 0) ? "STARTED\r\n" :
-                          (rc == 1) ? "RUNNING\r\n" :
-                                      "ERROR\r\n";
-        size_t mlen = strlen(msg);
-
-        h.response.bodylen = (uint32_t)mlen;
-        size_t total = sizeof(h) + mlen;
-        char *resp = malloc(total);
-        if (!resp) { write_bin_error(c, PROTOCOL_BINARY_RESPONSE_ENOMEM, NULL, 0); return; }
-        memcpy(resp, &h, sizeof(h));
-        memcpy(resp + sizeof(h), msg, mlen);
-        write_and_free(c, resp, (int)total);
-        return;
-    }
-    else if (strcmp(act, "stop") == 0) {
-        int rc = mcz_sampler_stop();
-        const char *msg = (rc == 0) ? "STOPPED\r\n" :
-                          (rc == 1) ? "NOT RUNNING\r\n" :
-                                      "ERROR\r\n";
-        size_t mlen = strlen(msg);
-
-        h.response.bodylen = (uint32_t)mlen;
-        size_t total = sizeof(h) + mlen;
-        char *resp = malloc(total);
-        if (!resp) { write_bin_error(c, PROTOCOL_BINARY_RESPONSE_ENOMEM, NULL, 0); return; }
-        memcpy(resp, &h, sizeof(h));
-        memcpy(resp + sizeof(h), msg, mlen);
-        write_and_free(c, resp, (int)total);
-        return;
-    } else if (strcmp(act, "status") == 0) {
-        char *payload = NULL; size_t plen = 0;
-        if (build_sampler_status(&payload, &plen, 1 /* json */) != 0 || !payload) {
-            write_bin_error(c, PROTOCOL_BINARY_RESPONSE_EINVAL, NULL, 0);
-            return;
-        }
-        h.response.bodylen = (uint32_t)plen;
-        size_t total = sizeof(h) + plen;
-        char *resp = (char*)malloc(total);
-        if (!resp) { free(payload); write_bin_error(c, PROTOCOL_BINARY_RESPONSE_ENOMEM, NULL, 0); return; }
-        memcpy(resp, &h, sizeof(h));
-        memcpy(resp + sizeof(h), payload, plen);
-        free(payload);
-        write_and_free(c, resp, (int)total);
-        return;
-    }
-
-    write_bin_error(c, PROTOCOL_BINARY_RESPONSE_EINVAL, NULL, 0);
-}
-
-
 /* ----------  mcdc reload ... ------------*/
 
 static int reload_status_ascii(char *buf, size_t cap, mcz_reload_status_t *st) {
@@ -393,55 +289,7 @@ static int build_reload_status(char **outp, size_t *lenp, int json) {
     return 0;
 }
 
-/* Binary protocol implementation "mcdc reload"*/
-
-void process_mcz_reload_bin(conn *c)
-{
-    const protocol_binary_request_header *req = &c->binary_header;
-
-    /* In 1.6.38, these are host-order already */
-    uint8_t  extlen  = req->request.extlen;
-    uint16_t keylen  = req->request.keylen;
-    uint32_t bodylen = req->request.bodylen;
-
-    /* Expect no body for this op */
-    if (extlen != 0 || keylen != 0 || bodylen != 0) {
-        write_bin_error(c, PROTOCOL_BINARY_RESPONSE_EINVAL, NULL, 0);
-        return;
-    }
-
-    /* Build payload */
-    char *payload = NULL; size_t plen = 0;
-    if (build_reload_status(&payload, &plen, 1) != 0 || !payload) {
-        write_bin_error(c, PROTOCOL_BINARY_RESPONSE_EINVAL, NULL, 0);
-        if(payload) free(payload);
-        return;
-    }
-
-    /* Compose response header + value into one contiguous buffer */
-    size_t total = sizeof(protocol_binary_response_header) + plen;
-    char *resp = (char *)malloc(total);
-    if (!resp) { free(payload); write_bin_error(c, PROTOCOL_BINARY_RESPONSE_ENOMEM, NULL, 0); return; }
-
-    protocol_binary_response_header h;
-    memset(&h, 0, sizeof(h));
-    h.response.magic    = PROTOCOL_BINARY_RES;
-    h.response.opcode   = PROTOCOL_BINARY_CMD_MCDC_RELOAD;   /* 0xE5 */
-    h.response.keylen   = 0;
-    h.response.extlen   = 0;
-    h.response.datatype = PROTOCOL_BINARY_RAW_BYTES;
-    h.response.status   = PROTOCOL_BINARY_RESPONSE_SUCCESS;
-    h.response.bodylen  = (uint32_t)plen;                /* host-order; core swaps on send */
-    h.response.opaque   = req->request.opaque;
-    h.response.cas      = 0;
-
-    memcpy(resp, &h, sizeof(h));
-    if (plen) memcpy(resp + sizeof(h), payload, plen);
-    free(payload);
-
-    write_and_free(c, resp, (int)total);
-}
-
+/* ----------  mcdc config ... ------------*/
 static int cfg_ascii(char *buf, size_t cap, mcz_cfg_t *c) {
     if (!c) return -1;
 
@@ -498,7 +346,6 @@ static int cfg_ascii(char *buf, size_t cap, mcz_cfg_t *c) {
     return n;
 }
 
-/* (Binary uses this JSON as the value; ASCII can request it via 'mcdc config json') */
 static int cfg_json(char *buf, size_t cap, mcz_cfg_t *c) {
     if (!c) return -1;
 
@@ -580,53 +427,6 @@ static int build_cfg(char **outp, size_t *lenp, int json) {
     return 0;
 }
 
-/* Binary implementation  of "mcdc config" */
-
-void process_mcz_cfg_bin(conn *c)
-{
-    const protocol_binary_request_header *req = &c->binary_header;
-
-    /* In 1.6.38, these are host-order already */
-    uint8_t  extlen  = req->request.extlen;
-    uint16_t keylen  = req->request.keylen;
-    uint32_t bodylen = req->request.bodylen;
-
-    /* Expect no body for this op */
-    if (extlen != 0 || keylen != 0 || bodylen != 0) {
-        write_bin_error(c, PROTOCOL_BINARY_RESPONSE_EINVAL, NULL, 0);
-        return;
-    }
-
-    /* Build JSON payload */
-    char *payload = NULL; size_t plen = 0;
-    if (build_cfg(&payload, &plen, 1 /* json */) != 0 || !payload) {
-        write_bin_error(c, PROTOCOL_BINARY_RESPONSE_EINVAL, NULL, 0);
-        return;
-    }
-
-    /* Compose response header + value into one contiguous buffer */
-    size_t total = sizeof(protocol_binary_response_header) + plen;
-    char *resp = (char *)malloc(total);
-    if (!resp) { free(payload); write_bin_error(c, PROTOCOL_BINARY_RESPONSE_ENOMEM, NULL, 0); return; }
-
-    protocol_binary_response_header h;
-    memset(&h, 0, sizeof(h));
-    h.response.magic    = PROTOCOL_BINARY_RES;
-    h.response.opcode   = PROTOCOL_BINARY_CMD_MCDC_CFG;   /* 0xE3 */
-    h.response.keylen   = 0;
-    h.response.extlen   = 0;
-    h.response.datatype = PROTOCOL_BINARY_RAW_BYTES;
-    h.response.status   = PROTOCOL_BINARY_RESPONSE_SUCCESS;
-    h.response.bodylen  = (uint32_t)plen;                /* host-order; core swaps on send */
-    h.response.opaque   = req->request.opaque;
-    h.response.cas      = 0;
-
-    memcpy(resp, &h, sizeof(h));
-    if (plen) memcpy(resp + sizeof(h), payload, plen);
-    free(payload);
-
-    write_and_free(c, resp, (int)total);
-}
 
 /*    mcdc stats ... */
 
@@ -759,79 +559,7 @@ static int build_stats_json(char **outp, size_t *lenp,
     return 0;
 }
 
-/* Binary protocol implementation of "mcdc stats ..." command */
-void process_mcz_stats_bin(conn *c)
-{
-    const protocol_binary_request_header *req = &c->binary_header;
-    uint8_t  extlen  = req->request.extlen;
-    uint16_t keylen  = req->request.keylen;
-    uint32_t bodylen = req->request.bodylen;
 
-    /* Basic shape validation */
-    if (bodylen < (uint32_t)extlen + (uint32_t)keylen) {
-        write_bin_error(c, PROTOCOL_BINARY_RESPONSE_EINVAL, NULL, 0);
-        return;
-    }
-
-    /* Body layout: [extras=extlen][key=keylen][value=remaining] — we expect no extras/value */
-    const char *ns   = NULL;
-    size_t      nslen= 0;
-
-    if (keylen) {
-        /* Body in rbuf immediately follows the 24-byte header */
-        const char *body = (const char *)c->rbuf + sizeof(protocol_binary_request_header);
-        ns    = body + extlen;      /* start of key */
-        nslen = (size_t)keylen;     /* not NUL-terminated */
-        if ((nslen == sizeof("global") - 1) && strncmp ("global", ns, nslen) == 0){
-            ns = NULL;
-            nslen = 0;
-        }
-    }
-
-    /* Build snapshot (ns==NULL -> global) */
-    mcz_stats_snapshot_t snap;
-    memset(&snap, 0, sizeof(snap));
-    if (mcz_get_stats_snapshot(&snap, ns, nslen) < 0) {
-        write_bin_error(c, PROTOCOL_BINARY_RESPONSE_EINVAL, NULL, 0);
-        return;
-    }
-
-    /* JSON payload */
-    char *payload = NULL;
-    size_t plen = 0;
-
-    if (build_stats_json(&payload, &plen, ns ? ns : "global", &snap) < 0) {
-        write_bin_error(c, PROTOCOL_BINARY_RESPONSE_ENOMEM, NULL, 0);
-        return;
-    }
-
-    /* Compose full binary response (header + value) into one contiguous buffer */
-    size_t total = sizeof(protocol_binary_response_header) + plen;
-    char *resp = (char *)malloc(total);
-    if (!resp) {
-        free(payload);
-        write_bin_error(c, PROTOCOL_BINARY_RESPONSE_ENOMEM, NULL, 0);
-        return;
-    }
-
-    protocol_binary_response_header h;
-    memset(&h, 0, sizeof(h));
-    h.response.magic    = PROTOCOL_BINARY_RES;
-    h.response.opcode   = PROTOCOL_BINARY_CMD_MCDC_STATS;      /* 0xE1 */
-    h.response.keylen   = htons(0);
-    h.response.extlen   = 0;
-    h.response.datatype = PROTOCOL_BINARY_RAW_BYTES;
-    h.response.status   = htons(PROTOCOL_BINARY_RESPONSE_SUCCESS);
-    h.response.bodylen  = htonl((uint32_t)plen);
-    h.response.opaque   = req->request.opaque;
-    h.response.cas      = 0;
-
-    memcpy(resp, &h, sizeof(h));
-    if (plen) memcpy(resp + sizeof(h), payload, plen);
-    free(payload);
-
-    write_and_free(c, resp, (int)total);
-}
 
 /* Build ASCII multiline payload:
    NS global\r\n
@@ -875,90 +603,6 @@ static int build_ns_ascii(char **outp, size_t *lenp) {
 
     *outp = buf; *lenp = off;
     return 0;
-}
-
-static int build_ns_text_value(char **outp, size_t *lenp) {
-    size_t n = 0, i;
-    const char **list = mcz_list_namespaces(&n);
-
-    /* First pass: compute size of newline-separated blob */
-    size_t total = 0;
-    total += sizeof("global\n");
-    int has_default = 0;
-    for (i = 0; i < n; i++) {
-        const char *ns = list ? list[i] : NULL;
-        if (!ns) continue;
-        if (strcmp(ns, "default") == 0) has_default = 1;
-        total += strlen(ns) + 1; /* '\n' */
-    }
-    if (!has_default) total += sizeof("default\n");
-
-    char *buf = (char *)malloc(total + 1);
-    if (!buf) return -1;
-
-    size_t off = 0;
-    memcpy(buf + off, "global\n", 7); off += 7;
-    for (i = 0; i < n; i++) {
-        const char *ns = list ? list[i] : NULL;
-        if (!ns) continue;
-        size_t L = strlen(ns);
-        memcpy(buf + off, ns, L); off += L;
-        buf[off++] = '\n';
-    }
-    if (!has_default) {
-        memcpy(buf + off, "default\n", 8); off += 8;
-    }
-    buf[off] = '\0';
-
-    if (list) free((void*)list);
-
-    *outp = buf; *lenp = off;
-    return 0;
-}
-
-/* Binary protocol impelementation of "mcdc ns" command */
-void process_mcz_ns_bin(conn *c)
-{
-    const protocol_binary_request_header *req = &c->binary_header;
-
-    /* In 1.6.38, these are already host-order */
-    uint8_t  extlen  = req->request.extlen;
-    uint16_t keylen  = req->request.keylen;
-    uint32_t bodylen = req->request.bodylen;
-
-    /* Expect no extras/key/value for this op */
-    if (extlen != 0 || keylen != 0 || bodylen != 0) {
-        write_bin_error(c, PROTOCOL_BINARY_RESPONSE_EINVAL, NULL, 0);
-        return;
-    }
-
-    char *payload = NULL; size_t plen = 0;
-    if (build_ns_text_value(&payload, &plen) != 0) {
-        write_bin_error(c, PROTOCOL_BINARY_RESPONSE_ENOMEM, NULL, 0);
-        return;
-    }
-
-    size_t total = sizeof(protocol_binary_response_header) + plen;
-    char *resp = (char *)malloc(total);
-    if (!resp) { free(payload); write_bin_error(c, PROTOCOL_BINARY_RESPONSE_ENOMEM, NULL, 0); return; }
-
-    protocol_binary_response_header h;
-    memset(&h, 0, sizeof(h));
-    h.response.magic    = PROTOCOL_BINARY_RES;
-    h.response.opcode   = PROTOCOL_BINARY_CMD_MCDC_NS;
-    h.response.keylen   = 0;
-    h.response.extlen   = 0;
-    h.response.datatype = PROTOCOL_BINARY_RAW_BYTES;
-    h.response.status   = PROTOCOL_BINARY_RESPONSE_SUCCESS;
-    h.response.bodylen  = (uint32_t)plen;       /* host-order; core will swap on write */
-    h.response.opaque   = req->request.opaque;
-    h.response.cas      = 0;
-
-    memcpy(resp, &h, sizeof(h));
-    if (plen) memcpy(resp + sizeof(h), payload, plen);
-    free(payload);
-
-    write_and_free(c, resp, (int)total);
 }
 
 /* Text protocol main entry point */

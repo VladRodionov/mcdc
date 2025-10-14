@@ -16,20 +16,16 @@
 /*
  * mcz_cmd.h - Declarations for custom MCZ commands in memcached.
  *
- * This header defines prototypes and constants for the ASCII and binary
+ * This header defines prototypes and constants for the text
  * command extensions used by the MCZ module. These include "mcz stats",
  * "mcz ns", "mcz config" and "mcz sampler", which allow clients to query runtime
  * statistics, list active namespaces, view current configuration and control data sampling.
  *
  * Responsibilities:
  *   - Declare command opcodes for the binary protocol.
- *   - Provide function prototypes for ASCII command dispatcher and
- *     binary protocol handlers.
+ *   - Provide function prototypes for ASCII command dispatcher
  *   - Export accessors to retrieve runtime configuration for serialization.
  *
- * Naming:
- *   All exported functions start with "process_mcz_" and operate on
- *   memcached connection objects. Internal helpers remain in mcz_cmd.c.
  */
 #pragma once
 #include "memcached.h"     /* conn, out_string, write_* */
@@ -39,28 +35,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#define PROTOCOL_BINARY_CMD_MCDC_STATS 0xE1
-#define PROTOCOL_BINARY_CMD_MCDC_NS 0xE2
-#define PROTOCOL_BINARY_CMD_MCDC_CFG 0xE3
-#define PROTOCOL_BINARY_CMD_MCDC_SAMPLER 0xE4
-#define PROTOCOL_BINARY_CMD_MCDC_RELOAD 0xE5
-
-
-/* Binary: MCZ_STATS 0xE1 */
-void process_mcz_stats_bin(conn *c);
-
-/* Binary: MCZ_NS (0xE2) */
-void process_mcz_ns_bin(conn *c);
-
-/* Binary: MCZ_CFG (0xE3) */
-void process_mcz_cfg_bin(conn *c);
-
-/* Binary: MCZ_SAMPLER 0xE4 */
-void process_mcz_sampler_bin(conn *c);
-
-/* Binary: MCZ_SAMPLER 0xE5 */
-void process_mcz_reload_bin(conn *c);
 
 /* Ascii handler */
 void process_mcz_command_ascii(conn *c, token_t *tokens, const size_t ntokens);

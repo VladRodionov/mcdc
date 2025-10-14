@@ -1076,23 +1076,6 @@ static void dispatch_bin_command(conn *c, char *extbuf) {
                 protocol_error = 1;
             }
             break;
-#ifdef USE_ZSTD
-        case PROTOCOL_BINARY_CMD_MCDC_STATS:
-            process_mcz_stats_bin(c);
-            break;
-        case PROTOCOL_BINARY_CMD_MCDC_NS:
-            process_mcz_ns_bin(c);
-            break;
-        case PROTOCOL_BINARY_CMD_MCDC_CFG:
-            process_mcz_cfg_bin(c);
-            break;
-        case PROTOCOL_BINARY_CMD_MCDC_SAMPLER:
-            process_mcz_sampler_bin(c);
-            break;
-        case PROTOCOL_BINARY_CMD_MCDC_RELOAD:
-            process_mcz_reload_bin(c);
-            break;
-#endif
         default:
             write_bin_error(c, PROTOCOL_BINARY_RESPONSE_UNKNOWN_COMMAND, NULL,
                             bodylen);

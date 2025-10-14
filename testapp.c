@@ -1984,25 +1984,9 @@ static enum test_return test_binary_stat(void) {
     return TEST_PASS;
 }
 
-static int is_vendor_cmd(uint8_t cmd) {
-    switch (cmd) {
-    case 0xE1:
-    case 0xE2:
-    case 0xE3:
-    case 0xE4:
-        case 0xE5:
-        return 1;
-    default: return 0;
-    }
-}
-
 static enum test_return test_binary_illegal(void) {
     uint8_t cmd = 0x25;
     while (cmd != 0x00) {
-        if (is_vendor_cmd(cmd)) {
-            ++cmd;
-            continue;
-        }
         union {
             protocol_binary_request_no_extras request;
             protocol_binary_response_no_extras response;
