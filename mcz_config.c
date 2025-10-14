@@ -28,12 +28,22 @@
  *   - Plain C structures, minimal dependencies.
  *   - All symbols prefixed with `mcz_` for consistency.
  */
+#if defined(__APPLE__)
+  #ifndef _DARWIN_C_SOURCE
+  #define _DARWIN_C_SOURCE 1
+  #endif
+#else
+  #ifndef _POSIX_C_SOURCE
+  #define _POSIX_C_SOURCE 200809L
+  #endif
+#endif
 #include <ctype.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "memcached.h"                  /* settings, mcz_cfg_t          */
 #include "mcz_config.h"
