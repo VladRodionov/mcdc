@@ -918,8 +918,8 @@ ssize_t mcz_maybe_decompress(const item *it, mc_resp    *resp) {
 
     size_t expect = ZSTD_getFrameContentSize(src, compLen);
     if (expect == ZSTD_CONTENTSIZE_ERROR){
-        fprintf(stderr, "[mcz] decompress: corrupt frame (tid=%llu, id=%u, compLen=%zu, start=%lu)\n",
-               cur_tid(), did, compLen, *(uint64_t *)src);
+        fprintf(stderr, "[mcz] decompress: corrupt frame (tid=%llu, id=%u, compLen=%zu)\n",
+               cur_tid(), did, compLen);
         if(stats) atomic_inc64(&stats->decompress_errs, 1);
         return -EINVAL;
     }
