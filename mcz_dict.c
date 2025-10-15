@@ -496,32 +496,45 @@ static int assign_ids_from_fs(mcz_dict_meta_t *metas, size_t n,
  * IMPORTANT: returned array points into the existing ns_entry objects;
  *            caller must NOT free the strings, only the array if needed.
  */
-static const char **
-list_namespaces(const mcz_table_t *table, size_t *count)
-{
-    if (!table || table->nspaces == 0) {
-        if (count) *count = 0;
+
+static const char **list_namespaces(const mcz_table_t *table, size_t *count) {
+    if (count) *count = 0;
+    if (!table || table->nspaces == 0)
         return NULL;
-    }
-    /* Build temporary view into existing prefixes */
-    const char **list = malloc(table->nspaces * sizeof(char *));
-    if (!list) {
-        if (count) *count = 0;
+
+    const size_t n = table->nspaces;
+    const char **list = calloc(n, sizeof(*list));
+    if (!list)
         return NULL;
-    }
-    char * def_name = "default";
-    for (size_t i = 0; i < table->nspaces; i++) {
+
+    size_t out = 0;
+    for (size_t i = 0; i < n; i++) {
         mcz_ns_entry_t *ns = table->spaces[i];
-        if (!strcmp(ns->prefix, def_name)){
+        if (!ns || !ns->prefix)
             continue;
+
+        /* Skip "default" namespace */
+        if (strcmp(ns->prefix, "default") == 0)
+            continue;
+
+        list[out] = strdup(ns->prefix);
+        if (!list[out]) {
+            /* On failure, free previous strings and the list */
+            for (size_t j = 0; j < out; j++) free((void *)list[j]);
+            free(list);
+            return NULL;
         }
-        list[i] = ns ? ns->prefix : "";
+        out++;
     }
-    if (count) *count = table->nspaces;
 
-    return list;
+    if (out == 0) {  /* No entries after skipping defaults */
+        free(list);
+        return NULL;
+    }
+
+    if (count) *count = out;
+    return list;      /* Caller must free each list[i] and then list */
 }
-
 /* ----------------- PUBLIC API ----------------- */
 
 

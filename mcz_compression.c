@@ -29,6 +29,15 @@
  *   - Trainer thread may update global dictionary table asynchronously.
  *   - Always validate dictionary IDs and namespaces before use.
  */
+#if defined(__APPLE__)
+  #ifndef _DARWIN_C_SOURCE
+  #define _DARWIN_C_SOURCE 1
+  #endif
+#else
+  #ifndef _POSIX_C_SOURCE
+  #define _POSIX_C_SOURCE 200809L
+  #endif
+#endif
 #include "mcz_compression.h"
 #define ZDICT_STATIC_LINKING_ONLY
 #include <unistd.h>
@@ -36,6 +45,8 @@
 #include <stdio.h>          /* FILE, fopen, fread, fclose */
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+
 #include <errno.h>
 #include <assert.h>
 #include <unistd.h>         /* usleep                     */
@@ -1094,14 +1105,15 @@ const char **mcz_list_namespaces(size_t *count){
         return NULL;
     }
     char * def_name = "default";
+    size_t out = 0;
     for (size_t i = 0; i < table->nspaces; i++) {
         mcz_ns_entry_t *ns = table->spaces[i];
-        if (!strcmp(ns->prefix, def_name)){
+        if (ns && !strcmp(ns->prefix, def_name)){
             continue;
         }
-        list[i] = ns ? ns->prefix : "";
+        list[out++] = ns ? strdup(ns->prefix) : "";
     }
-    if (count) *count = table->nspaces;
+    if (count) *count = out;
 
     return list;
 
