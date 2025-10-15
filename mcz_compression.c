@@ -492,7 +492,8 @@ static void* trainer_main(void *arg) {
             mcz_eff_mark_retrained(now);
         }
         time_t finished = time(NULL);
-        fprintf(stderr, "Traininig time: %lds from starty: %ld\n", finished - started_train, finished - started);
+        if (settings.verbose > 1)
+            fprintf(stderr, "[mcdc] traininig time: %lds from start: %ld\n", finished - started_train, finished - started);
     }
 
     /* never reached */
@@ -1006,36 +1007,38 @@ prefill_stats_snapshot_ns(mcz_stats_snapshot_t *snapshot, const char *ns, size_t
 
     mcz_ctx_t *ctx = mcz_ctx_mut();
     if (!ctx) return -EFAULT;
-
+    bool is_default = is_default_ns(ns, ns_sz);
     mcz_table_t *tab = (mcz_table_t*)atomic_load_explicit(&ctx->dict_table, memory_order_acquire);
-    if (!tab) return -ENOENT;
+    if (!tab && !is_default) return -ENOENT;
 
     /* dict meta for this ns (including "default") */
     const mcz_dict_meta_t *meta = mcz_pick_dict(tab, ns, ns_sz);
-    if (!meta) return -ENOENT;
+    if (!meta && !is_default) return -ENOENT;
 
-    snapshot->dict_id   = meta->id;
-    snapshot->dict_size = meta->dict_size;
-
-    /* total dicts configured for this ns */
-    {
-        int found = 0;
-        for (size_t i = 0; i < tab->nspaces; i++) {
-            mcz_ns_entry_t *sp = tab->spaces[i];
-            if (!sp || !sp->ndicts || !sp->prefix) continue;
-
-            size_t plen = strlen(sp->prefix);
-            if (plen == ns_sz && memcmp(ns, sp->prefix, plen) == 0) {
-                snapshot->total_dicts = sp->ndicts;
-                found = 1;
-                break;
+    if (tab && meta){
+        snapshot->dict_id   = meta->id;
+        snapshot->dict_size = meta->dict_size;
+        
+        /* total dicts configured for this ns */
+        {
+            int found = 0;
+            for (size_t i = 0; i < tab->nspaces; i++) {
+                mcz_ns_entry_t *sp = tab->spaces[i];
+                if (!sp || !sp->ndicts || !sp->prefix) continue;
+                
+                size_t plen = strlen(sp->prefix);
+                if (plen == ns_sz && memcmp(ns, sp->prefix, plen) == 0) {
+                    snapshot->total_dicts = sp->ndicts;
+                    found = 1;
+                    break;
+                }
             }
+            if (!found) return -ENOENT;
         }
-        if (!found) return -ENOENT;
     }
 
     /* Only for the "default" namespace, add efficiency + mode */
-    if (is_default_ns(ns, ns_sz)) {
+    if (is_default) {
         snapshot->ewma_m          = mcz_eff_get_ewma();
         snapshot->baseline        = mcz_eff_get_baseline();
         snapshot->last_retrain_ms = mcz_eff_last_train_seconds() * 1000; /* seconds; field name kept */
