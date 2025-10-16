@@ -1,126 +1,210 @@
-# Memcached
 
-Memcached is a high performance multithreaded event-based key/value cache
-store intended to be used in a distributed system.
+# 🥕 MCDC — Memcached with Dictionary Compression
 
-See: https://memcached.org/about
+**MCDC** (Memcached Dictionary Compression) is a **drop-in replacement for Memcached 1.6.38** with built-in 
+**Zstandard dictionary compression**, delivering 1.5×–2.5× better RAM efficiency without any client-side 
+changes. MCDC is developed and maintained by [Carrot Data](https://github.com/carrotdata) — a project focused on practical, 
+SSD-friendly, memory-efficient caching technologies.
 
-A fun story explaining usage: https://memcached.org/tutorial
+---
 
-If you're having trouble, try the wiki: https://memcached.org/wiki
+## 🧩 What Is MCDC?
 
-If you're trying to troubleshoot odd behavior or timeouts, see:
-https://memcached.org/timeouts
+MCDC extends Memcached with adaptive, server-side data compression.  Instead of compressing 
+each object individually (like client SDKs usually do), MCDC automatically learns shared byte 
+patterns across your data and uses them  to build a **Zstandard dictionary**. Once trained, 
+the dictionary allows ultra-compact compression of small-to-medium, structurally similar objects — 
+tweets, JSON fragments, log entries, etc. — at minimal CPU cost.
 
-https://memcached.org/ is a good resource in general. Please use the mailing
-list to ask questions, github issues aren't seen by everyone!
+All standard Memcached commands, clients, and SDKs continue to work unchanged.
 
-## Dependencies
+---
 
-* libevent - https://www.monkey.org/~provos/libevent/ (libevent-dev)
-* libseccomp (optional, experimental, linux) - enables process restrictions for
-  better security. Tested only on x86-64 architectures.
-* openssl (optional) - enables TLS support. need relatively up to date
-  version. pkg-config is needed to find openssl dependencies (such as -lz).
+## 🧠 Dictionary Compression — Why It Matters
 
-## Building from tarball
 
-If you downloaded this from the tarball, compilation is the standard process:
+Typical “client-side compression” operates in isolation: every key/value pair is compressed 
+independently, often wasting space on per-object headers, redundant Huffman tables, and 
+repeated symbol statistics. That approach is fine for large blobs, but ineffective for workloads
+with millions of small-to-medium, structurally similar objects.
+
+Most modern compressors — including Zstandard — are based on the LZ77 family of algorithms.
+They work by replacing repeated sequences in the input with back-references to earlier
+occurrences within a sliding window. When each object is compressed separately, the window
+is limited to that object’s own content, so the compressor can only exploit patterns that
+repeat within the same value. All cross-object redundancy is lost.
+
+Dictionary compression changes the game: instead of a small, local window, the compressor
+has access to a shared, pre-trained dictionary containing common byte sequences found across
+many objects. Each new value can now encode long back-references into this large shared base,
+reusing the same token and Huffman tables for the entire workload. The result is far fewer
+literal bytes and much higher compression ratios — especially for small JSON, text, or
+message-like objects that share similar structure.
+
+In short, a client-side compressor can only see inside a single message, while MCDC’s server-side
+dictionary compression sees across the entire dataset. That global view enables back-references 
+to patterns every client shares — a capability fundamentally impossible when compressing each 
+item in isolation.
+
+**Dictionary compression** fixes that inefficiency:
+
+1. **Training** — MCDC collects samples of your workload and trains a shared Zstandard dictionary.  
+2. **Encoding** — New values are compressed using that dictionary; redundant structure vanishes.  
+3. **Adapting** — The dictionary is periodically retrained as data evolves.
+
+The result is smaller objects, lower memory usage, and less network traffic —  without touching 
+your application code or client libraries.
+
+---
+
+## ✨ Key Features
+
+- 🔹 **Drop-in replacement** — fully compatible with Memcached 1.6.x  
+- 🔹 **Zstandard dictionary compression** with automatic retraining  
+- 🔹 **Dynamic sampling** and adaptive dictionary updates  
+- 🔹 **Namespace-aware** compression and statistics  
+- 🔹 **Low CPU overhead** — typical impact under 20-30 % at 2× memory savings  
+- 🔹 **JSON-based configuration and introspection commands**  
+- 🔹 **Zero client changes, no proxy required**
+
+---
+
+## 🧭 New Commands
+
+| Command | Description |
+|----------|-------------|
+| `mcz config [json]` | Prints current MCDC configuration |
+| `mcz stats [namespace] [json]` | Returns detailed compression and memory statistics global and per-namespace|
+| `mcz ns` | Lists active namespaces and their dictionaries |
+| `mcz reload [json]` | Forces dictionaries reload |
+| `mcz sampler [start stop status]` | Controls data spooling (for offline training) |
+
+All new commands follow the Memcached text protocol and can be tested via `telnet` or `nc`.
+
+---
+
+## 🧱 Prerequisites
+
+You need standard Memcached build dependencies plus Zstandard.
+
+Supported toolchains:
+-	GCC 11+  / Clang 14+
+-	libevent ≥ 2.1, libzstd ≥ 1.5
+
+Tested on Linux (x86-64 / aarch64) and macOS (arm64 / x86-64)
+
+⸻
+
+## ⚙️ Build
 
 ```
-./configure
-make
-make test # optional
-make install
+git clone https://github.com/VladRodionov/mcdc.git
+cd mcdc
+git checkout mcdc
 ```
 
-If you want TLS support, install OpenSSL's development packages and change the
-configure line:
-
-```
-./configure --enable-tls
-```
-
-If you want to enable the memcached proxy:
-
-```
-./configure --enable-proxy
-```
-
-## Building from git
-
-To build memcached in your machine from local repo you will have to install
-autotools, automake and libevent. In a debian based system that will look
-like this
-
-```
-sudo apt-get install autotools-dev automake libevent-dev
-```
-
-After that you can build memcached binary using automake
-
-```
-cd memcached
+Linux(Ubuntu):
+```bash
+sudo apt-get update
+sudo apt-get install -y build-essential autotools-dev pkgconf autoconf automake libtool m4 autoconf-archive \
+    libevent-dev libzstd-dev
 ./autogen.sh
-./configure
+./configure --with-zstd --with-libevent
 make
-make test
 ```
 
-It should create the binary in the same folder, which you can run
+MacOS - use `build-mac.sh`
 
+You’ll get:
 ```
-./memcached
-```
-
-You can telnet into that memcached to ensure it is up and running
-
-```
-telnet 127.0.0.1 11211
-stats
+memcached         # optimized release build + dictionary compression
+memcached-debug   # debug
 ```
 
-IF BUILDING PROXY, AN EXTRA STEP IS NECESSARY:
-
-The proxy has some additional vendor dependency code that we keep out of the
-tree.
+Example startup with dictionary compression enabled:
 
 ```
-cd memcached
-cd vendor
-./fetch.sh
-cd ..
-./autogen.sh
-./configure --enable-proxy
-make
-make test
+./memcached -m 3000 -z mcz.conf -p 11211
 ```
 
-## Environment
+Example mcz.conf:
 
-Be warned that the -k (mlockall) option to memcached might be
-dangerous when using a large cache. Just make sure the memcached machines
-don't swap.  memcached does non-blocking network I/O, but not disk.  (it
-should never go to disk, or you've lost the whole point of it)
+```
+enable_comp=true
+enable_dict=true
+dict_dir=../dict-data
+dict_size=1M
+comp_level=3
+min_comp_size=32
+max_comp_size=256K
 
-## Build status
+enable_training=true
+retraining_interval=2h
+min_training_size=0
+ewma_alpha=0.20
+retrain_drop=0.12
+train_mode=fast
+dict_retain_max=8
 
-See https://build.memcached.org/ for multi-platform regression testing status.
+enable_sampling=true
+sample_p=0.02
+sample_window_duration=100
+spool_dir=./samples
+spool_max_bytes=64MB
+```
+For deployment, monitoring, and systemd service integration, see the official Memcached installation guide.
+MCDC follows the same conventions and CLI options.
 
-## Bug reports
+⸻
 
-Feel free to use the issue tracker on github.
+## 📊 Benchmarks (Coming Soon)
 
-**If you are reporting a security bug** please contact a maintainer privately.
-We follow responsible disclosure: we handle reports privately, prepare a
-patch, allow notifications to vendor lists. Then we push a fix release and your
-bug can be posted publicly with credit in our release notes and commit
-history.
+This section will include reproducible membench results comparing
+vanilla Memcached 1.6.38 vs MCDC under multiple datasets
+(tweets, JSON objects, and mixed workloads).
 
-## Website
+Stay tuned — benchmark graphs and metrics will be published here soon.
 
-* https://www.memcached.org
+⸻
 
-## Contributing
+## 😂 Funny and Curious Moments During Development
 
-See https://github.com/memcached/memcached/wiki/DevelopmentRepos
+Developing MCDC wasn’t just compression ratios and profiler traces — there were some fun surprises:
+-	The Ancient Perl Tests:
+Memcached still relies on a large suite of Perl regression tests.
+Running them in 2025 felt like archaeology — proof that some code truly never dies.
+-	The “Random Data” Paradox:
+While verifying compression behavior, I discovered that
+even random-looking sequences can compress efficiently… if the alphabet is small (e.g., A–Z).
+Fewer than 256 unique symbols = exploitable structure for Zstandard’s entropy coder.
+-	Wrong assumptions
+Perl scripts assumed  that data is immutable, MCDC’s dictionary blew those expectations apart — 
+even Perl was surprised!
+
+These moments reminded me that data “randomness” is often an illusion — and that good compression 
+still finds patterns in places humans don’t.
+
+⸻
+
+## 📜 License
+
+MCDC is released under the Apache 2.0 License.
+It includes and extends Memcached 1.6.38, which is distributed under a BSD-style license.
+All trademarks and copyrights remain with their respective owners.
+
+⸻
+
+## 🙌 Acknowledgements
+
+MCDC builds upon two decades of exceptional work by the Memcached open-source community.
+Special thanks to the maintainers for keeping Memcached simple, fast, and stable —
+making it a perfect foundation for further innovation.
+
+Developed with ❤️ by Vlad Rodionov vladrodionov@gmail.com
+
+My other projects: [Carrot Data](https://www.github.com/carrotdata)
+
+“Cache Smart, Save More.”
+
+---
+
