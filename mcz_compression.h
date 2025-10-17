@@ -100,13 +100,6 @@ typedef struct mcz_reload_status_s {
     char      err[128];
 } mcz_reload_status_t;
 
-/* forward declarations – no memcached.h needed here */
-struct _stritem;     /* real 'item' struct in items.h   */
-typedef struct _stritem item;
-
-typedef struct _mc_resp mc_resp;  /* defined in memcached.c */
-
-
 /* Global init / destroy */
 int mcz_init(void);
 void mcz_destroy(void);
@@ -124,14 +117,16 @@ ssize_t mcz_orig_size(const void *src, size_t comp_size);
  *    0  : either ITEM_ZSTD flag not set  *or*  item is chunked
  *   <0  : negative errno / ZSTD error code
  */
-ssize_t mcz_maybe_decompress(const item *it, mc_resp    *resp);
-
+ssize_t mcz_maybe_decompress(const char *value,
+                             size_t value_sz, const char *key, size_t key_sz, void **dst, uint16_t did);
 void mcz_report_dict_miss_err(const char *key, size_t klen);
 
 void mcz_report_decomp_err(const char *key, size_t klen);
 
 const mcz_ctx_t *mcz_ctx(void);
 mcz_ctx_t       *mcz_ctx_mut(void);
+
+int mcz_set_max_value_limit(size_t limit);
 
 /* Feed raw samples for future dictionary training and file spooling*/
 void mcz_sample(const void *key, size_t klen, const void *value, size_t vlen);

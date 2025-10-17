@@ -57,7 +57,6 @@
 #include <limits.h>         /* PATH_MAX                   */
 #include <sys/types.h>
 #include <sys/stat.h>
-#include "memcached.h"
 #include "mcz_incompressible.h"
 #include "mcz_utils.h"
 #include "mcz_gc.h"
@@ -91,7 +90,7 @@ enum {
     ZSTD_LVL_MIN   = 1,
     ZSTD_LVL_MAX   = 22,
     ZSTD_DICT_MAX  = MB(1),   /* upstream hard-limit */
-    ZSTD_VALUE_MAX = KB(200),  /* arbitrary safety cap, usually must be much less*/
+    ZSTD_VALUE_MAX = KB(256),  /* arbitrary safety cap, usually must be much less*/
     ZSTD_VALUE_MIN = 16        /* absolute min size of a value for compression */
 };
 
@@ -108,7 +107,7 @@ static int attach_cfg(void)
     if (lvl == 0)                           /* 0 = default (3) */
         lvl = 3;
     if (lvl < ZSTD_LVL_MIN || lvl > ZSTD_LVL_MAX) {
-        if (settings.verbose > 1) {
+        if (cfg->verbose > 1) {
             fprintf(stderr,
                     "ERROR: zstd level %d out of range [%d..%d]\n",
                     lvl, ZSTD_LVL_MIN, ZSTD_LVL_MAX);
@@ -123,15 +122,37 @@ static int attach_cfg(void)
     if (dict_sz > ZSTD_DICT_MAX) dict_sz = ZSTD_DICT_MAX;
     cfg->dict_size = dict_sz;
 
-    if (cfg->max_comp_size >= settings.slab_chunk_size_max){
-        cfg->max_comp_size = settings.slab_chunk_size_max - 1;
+    if (cfg->min_comp_size > cfg->max_comp_size ||
+        cfg->max_comp_size > ZSTD_VALUE_MAX) {
+        if (cfg->verbose > 1) {
+            fprintf(stderr,
+                    "ERROR: invalid zstd min/max comp size (%zu / %zu)\n",
+                    cfg->min_comp_size, cfg->max_comp_size);
+        }
+        return -EINVAL;
+    }
+    return 0;
+}
+
+/* This is 'memcached` specific API call. We do not support "chunked items",
+ therefore must know in advance the maximum chunk size to disable compression for values larger than */
+
+int mcz_set_max_value_limit(size_t limit){
+    mcz_cfg_t *cfg =  mcz_config_get();
+    if (cfg->max_comp_size >= limit){
+        cfg->max_comp_size = limit - 1;
         if (cfg->max_comp_size > ZSTD_VALUE_MAX){
             cfg->max_comp_size = ZSTD_VALUE_MAX;
+        }
+        if (cfg->verbose > 1) {
+            fprintf(stderr,
+                    "WARN: set maximum value size for compresion to %zu\n",
+                    cfg->max_comp_size);
         }
     }
     if (cfg->min_comp_size > cfg->max_comp_size ||
         cfg->max_comp_size > ZSTD_VALUE_MAX) {
-        if (settings.verbose > 1) {
+        if (cfg->verbose > 1) {
             fprintf(stderr,
                     "ERROR: invalid zstd min/max comp size (%zu / %zu)\n",
                     cfg->min_comp_size, cfg->max_comp_size);
@@ -251,7 +272,7 @@ static int mcz_load_dicts(void) {
     if (tab) {
         atomic_store_explicit(&ctx->dict_table, (uintptr_t)tab, memory_order_release);
         build_reload_status(tab, NULL, st);
-        if(settings.verbose > 1) {
+        if(ctx->cfg->verbose > 1) {
             reload_status_dump(st);
         }
         free(st);
@@ -441,20 +462,20 @@ static void* trainer_main(void *arg) {
         size_t dict_sz = train_dictionary(dict, max_dict, buff, sizes, count);
 
         if (ZSTD_isError(dict_sz)) {
-            if (settings.verbose > 1) {
+            if (ctx->cfg->verbose > 1) {
                 log_rate_limited(10ULL * 1000000ULL,
                     "mcz-dict: TRAIN ERROR %s (samples=%zu, bytes=%zu)\n",
                     ZSTD_getErrorName(dict_sz), count, total);
             }
             if (stats) atomic_inc64(&stats->trainer_errs, 1);
         } else if (dict_sz < 1024) {
-            if (settings.verbose > 1) {
+            if (ctx->cfg->verbose > 1) {
                 log_rate_limited(10ULL * 1000000ULL,
                     "mcz-dict: dict too small (%zu B, need ≥1 KiB)\n", dict_sz);
             }
             if (stats) atomic_inc64(&stats->trainer_errs, 1);
         } else {
-            if (settings.verbose > 1) {
+            if (ctx->cfg->verbose > 1) {
                 log_rate_limited(1000000ULL,
                     "mcz-dict: new dict (%zu B) built from %zu samples\n", dict_sz, count);
             }
@@ -503,7 +524,7 @@ static void* trainer_main(void *arg) {
             mcz_eff_mark_retrained(now);
         }
         time_t finished = time(NULL);
-        if (settings.verbose > 1)
+        if (ctx->cfg->verbose > 1)
             fprintf(stderr, "[mcdc] traininig time: %lds from start: %ld\n", finished - started_train, finished - started);
     }
 
@@ -523,7 +544,7 @@ static int mcz_start_trainer(mcz_ctx_t *ctx){
         pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
         pthread_create(&ctx->trainer_tid, &attr, trainer_main, ctx);
         pthread_attr_destroy(&attr);
-        if (settings.verbose > 1) {
+        if (ctx->cfg->verbose > 1) {
             log_rate_limited(1000000ULL,
                              "mcz-dict: trainer thread started (max_dict=%zu B)\n", ctx->cfg->dict_size);
         }
@@ -539,16 +560,12 @@ int mcz_init(void) {
     mcz_ctx_t *ctx = mcz_ctx_mut();
     if (!ctx)
         return -ENOMEM;
-    /* override from global settings*/
-    if (settings.mcdc_disabled){
-        ctx->cfg->enable_comp = false;
-        return 0;
-    }
-    mcz_config_sanity_check();
 
     if (!ctx->cfg->enable_comp){
         return 0;
     }
+    mcz_config_sanity_check();
+
     mcz_cfg_t *cfg = ctx->cfg;
     /* 1. atomic pointers / counters */
     atomic_init(&ctx->samples_head, NULL); /* empty list            */
@@ -582,7 +599,7 @@ int mcz_init(void) {
     mcz_start_trainer(ctx);
     /* ---------------- spawn background garbage collector ------------------ */
     mcz_gc_start(ctx);
-    if (settings.verbose > 1) {
+    if (cfg->verbose > 1) {
         log_rate_limited(0ULL,
                          "mcz: GC thread started\n");
     }
@@ -890,76 +907,64 @@ ssize_t mcz_decompress(const void *src,
     return (ssize_t) out_sz;
 }
 
-
-
 /* Return values
  *   >0  : decompressed length
  *    0  : either ITEM_ZSTD flag not set  *or*  item is chunked
  *   <0  : negative errno / ZSTD error code
  */
-ssize_t mcz_maybe_decompress(const item *it, mc_resp    *resp) {
+ssize_t mcz_maybe_decompress(const char *value,
+                             size_t value_sz, const char *key, size_t key_sz, void **out, uint16_t did) {
     mcz_ctx_t *ctx = mcz_ctx_mut();
-    if (!ctx || !it || !resp){
 
-        fprintf(stderr, "[mcz] decompress: bad args (ctx=%p it=%p resp=%p)\n",
-               (void*)ctx, (void*)it, (void*)resp);
-        return -EINVAL; /* invalid arguments */
-    }
-
-    /* Statistics */
-    mcz_stats_atomic_t * stats = mcz_stats_lookup_by_key((const char *) ITEM_key(it), it->nkey);
+    /* 1. Statistics */
+    mcz_stats_atomic_t * stats = mcz_stats_lookup_by_key(key, key_sz);
     if(stats) atomic_inc64(&stats->reads_total, 1);
 
-    /* 1. Skip if not compressed or chunked ------------------------ */
-     if (!(it->it_flags & ITEM_ZSTD) || (it->it_flags & ITEM_CHUNKED))
-         return 0;                         /* treat as plain payload */
-
-     /* 2. Dictionary lookup --------------------------------------- */
-     uint16_t  did = ITEM_get_dictid(it);
-     const ZSTD_DDict *dd = get_ddict_by_id(did);
+    /* 2. Dictionary lookup --------------------------------------- */
+    const ZSTD_DDict *dd = get_ddict_by_id(did);
     if (!dd && did > 0){
-        fprintf(stderr, "[mcz] decompress: unknown dict id %u\n", did);
+        if(ctx->cfg->verbose > 0)
+            fprintf(stderr, "[mcz] decompress: unknown dict id %u\n", did);
         if(stats) atomic_inc64(&stats->dict_miss_errs, 1);
         //TODO: item must be deleted upstream
         return -EINVAL;                  /* unknown dict id */
     }
 
     /* 3. Prepare destination buffer ------------------------------ */
-    const void *src     = ITEM_data(it);
-    size_t      compLen = it->nbytes;
-
-    size_t expect = ZSTD_getFrameContentSize(src, compLen);
+    size_t expect = ZSTD_getFrameContentSize(value, value_sz);
     if (expect == ZSTD_CONTENTSIZE_ERROR){
-        fprintf(stderr, "[mcz] decompress: corrupt frame (tid=%llu, id=%u, compLen=%zu)\n",
-               cur_tid(), did, compLen);
+        if(ctx->cfg->verbose > 0)
+            fprintf(stderr, "[mcz] decompress: corrupt frame (tid=%llu, id=%u, compLen=%zu)\n",
+               cur_tid(), did, value_sz);
         if(stats) atomic_inc64(&stats->decompress_errs, 1);
         return -EINVAL;
     }
     if (expect == ZSTD_CONTENTSIZE_UNKNOWN)
-        expect = compLen * 4u;           /* pessimistic */
+        expect = value_sz * 4u;           /* pessimistic */
 
     void *dst = malloc(expect);
     if (!dst){
-        fprintf(stderr,"[mcz] decompress: malloc(%zu) failed: %s\n",
+        if(ctx->cfg->verbose > 0)
+            fprintf(stderr,"[mcz] decompress: malloc(%zu) failed: %s\n",
                 expect, strerror(errno));
         if(stats) atomic_inc64(&stats->decompress_errs, 1);
 
         return -ENOMEM;
     }
-
+    
     /* 4. Decompress ---------------------------------------------- */
-    ssize_t dec = mcz_decompress(src, compLen, dst, expect, did);
+    ssize_t dec = mcz_decompress(value, value_sz, dst, expect, did);
 
-    if (dec < 0) {                       /* ZSTD error */
-        fprintf(stderr, "[mcz decompress: mcz_decompress() -> %zd (id=%u)\n",
+    if (dec < 0) {
+        if(ctx->cfg->verbose > 0)
+        /* ZSTD error */
+            fprintf(stderr, "[mcz decompress: mcz_decompress() -> %zd (id=%u)\n",
                 dec, did);
         free(dst);
         if(stats) atomic_inc64(&stats->decompress_errs, 1);
         return dec;
     }
-
-    /* 5. Hand buffer to network layer ---------------------------- */
-    resp->write_and_free = dst;
+    *out = dst;
     return dec;                          /* decompressed bytes */
 }
 
@@ -998,7 +1003,7 @@ mcz_reload_status_t *mcz_reload_dictionaries(void)
     mcz_table_t *oldtab = (mcz_table_t*)atomic_load_explicit(&ctx->dict_table, memory_order_acquire);
     mcz_publish_table(newtab);
     build_reload_status(newtab, oldtab, st);
-    if(settings.verbose > 1) {
+    if(ctx->cfg->verbose > 1) {
         reload_status_dump(st);
     }
     return st;

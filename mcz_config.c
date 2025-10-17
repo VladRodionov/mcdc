@@ -187,6 +187,8 @@ void mcz_init_default_config(void) {
     g_cfg.spool_dir             = MCZ_DEFAULT_SPOOL_DIR;
     g_cfg.spool_max_bytes       = MCZ_DEFAULT_SPOOL_MAX_BYTES;
     g_cfg.compress_keys         = MCZ_DEFAULT_COMPRESS_KEYS;
+    g_cfg.verbose               = MCZ_DEFAULT_VERBOSE;
+    
     inited = true;
 }
 
@@ -211,20 +213,20 @@ int mcz_config_sanity_check(void) {
 
     // dict_dir must exist
     if (strnull_or_empty(cfg->dict_dir)) {
-        fprintf(stderr, "[mcz] sanity check: dict_dir is missing\n");
+        fprintf(stderr, "[mcz] - sanity check: dict_dir is missing\n");
         ok = false;
     }
 
     // spool_dir required if sampling enabled
     if (cfg->enable_sampling && strnull_or_empty(cfg->spool_dir)) {
-        fprintf(stderr, "[mcz] sanity check: sampling enabled but spool_dir is missing\n");
+        fprintf(stderr, "[mcz] - sanity check: sampling enabled but spool_dir is missing\n");
         ok = false;
     }
 
     if (!ok) {
         cfg->enable_dict = false;
         cfg->enable_training = false;
-        fprintf(stderr, "[mcz] sanity check: dictionary compression is disabled\n");
+        fprintf(stderr, "[mcz] - sanity check: dictionary compression is disabled\n");
         return -1;
     }
 

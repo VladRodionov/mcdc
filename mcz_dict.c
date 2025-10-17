@@ -81,7 +81,6 @@
 #include "mcz_utils.h"
 #include "mcz_dict_pool.h"
 #include "mcz_stats.h"
-#include "memcached.h"   /* for settings, mc logging if you have it */
 
 
 /* ----- manifest parsing ----- */
@@ -680,9 +679,7 @@ mcz_table_t *mcz_scan_dict_dir(const char *dir,
                 set_err(err_out, "mcz_scan_dict_dir: dict load failed. Check the server's log for details");
             }
             /* If load fails, retire and persist so FS remains the truth, log error even if verbose = 1 */
-            if (settings.verbose > 0){
-                fprintf(stderr, "[mcz-scan-dict-dir] failed to load %s", m->dict_path);
-            }
+            fprintf(stderr, "[mcz-scan-dict-dir] failed to load %s", m->dict_path);
             mcz_mark_dict_retired(m, now, err_out);
         }
     }

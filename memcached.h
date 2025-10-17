@@ -581,9 +581,6 @@ struct settings {
 #ifdef SOCK_COOKIE_ID
     uint32_t sock_cookie_id;
 #endif
-#ifdef USE_ZSTD
-    bool mcdc_disabled;
-#endif
 
 };
 

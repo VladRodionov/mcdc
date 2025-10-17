@@ -75,6 +75,7 @@ typedef struct {
     int      sample_window_duration;// maximum duration of a sampling in seconds
     char    *spool_dir;             // path to the spool directory
     size_t   spool_max_bytes;       // cap bytes to collect
+    int verbose;                    // logging level, default - 0 (minimum), its memcached style
 } mcz_cfg_t;
 
 
@@ -107,6 +108,7 @@ typedef struct {
 #define MCZ_DEFAULT_SPOOL_MAX_BYTES        (64 * 1024 * 1024)
 
 #define MCZ_DEFAULT_COMPRESS_KEYS          false
+#define MCZ_DEFAULT_VERBOSE                0
 
 /* --------------------------------------------------------------------
  * parse_mcz_config()

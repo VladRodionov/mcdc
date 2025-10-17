@@ -61,6 +61,10 @@
 #include <sys/sysctl.h>
 #endif
 
+#ifdef USE_ZSTD
+#include "mcz_config.h"
+#endif
+
 /*
  * forward declarations
  */
@@ -277,9 +281,6 @@ static void settings_init(void) {
     settings.memory_file = NULL;
 #ifdef SOCK_COOKIE_ID
     settings.sock_cookie_id = 0;
-#endif
-#ifdef USE_ZSTD
-    settings.mcdc_disabled = false;
 #endif
 
 }
@@ -1013,16 +1014,20 @@ void resp_add_iov_data(mc_resp *resp, item *it, int len){
 #ifdef USE_ZSTD
     bool bin_proto = it->nbytes == len + 2;
     /* mcz_maybe_decompress() may set resp->write_and_free            */
-    ssize_t ds = mcz_maybe_decompress(it, resp);
-    if (ds > 0) {                        /* success: use plain data  */
-        ptr = resp->write_and_free;
-        sz  = bin_proto? (size_t)ds - 2/*Do not send last \r\n*/: (size_t)ds;
-    } else if (ds < 0) {                 /* decompression failed     */
-        fprintf(stderr,
-            "ERROR: decompression failed for item %.*s (%d B), "
-            "sending compressed copy.\n",
-            it->nkey, ITEM_key(it), it->nbytes);
-        /* ptr, sz already point to compressed bytes */
+    /* 1. Skip if not compressed or chunked ------------------------ */
+    if ((it->it_flags & ITEM_ZSTD) && !(it->it_flags & ITEM_CHUNKED)) {
+        ssize_t ds = mcz_maybe_decompress(ITEM_data(it), it->nbytes, ITEM_key(it),
+                                          it->nkey, &resp->write_and_free, ITEM_get_dictid(it));
+        if (ds > 0) {                        /* success: use plain data  */
+            ptr = resp->write_and_free;
+            sz  = bin_proto? (size_t)ds - 2/*Do not send last \r\n*/: (size_t)ds;
+        } else if (ds < 0) {                 /* decompression failed     */
+            fprintf(stderr,
+                    "ERROR: decompression failed for item %.*s (%d B), "
+                    "sending compressed copy.\n",
+                    it->nkey, ITEM_key(it), it->nbytes);
+            /* ptr, sz already point to compressed bytes */
+        }
     }
     /* ds == 0 → not compressed: keep defaults                       */
 #endif
@@ -5721,9 +5726,13 @@ int main (int argc, char **argv) {
                 break;
 #endif
 #ifdef USE_ZSTD
-                case MCDC_DISABLED:
-                    settings.mcdc_disabled = true;
+                case MCDC_DISABLED: {
+                    mcz_init_default_config();
+                    mcz_cfg_t *cfg =  mcz_config_get();
+                    cfg->enable_comp = false;
+                    cfg->enable_dict = false;
                     break;
+                }
 #endif
             default:
 #ifdef EXTSTORE
@@ -6094,7 +6103,10 @@ int main (int argc, char **argv) {
     }
 #endif
 #ifdef USE_ZSTD
+    mcz_cfg_t *cfg =  mcz_config_get();
+    cfg->verbose = settings.verbose;
     mcz_init();
+    mcz_set_max_value_limit(settings.slab_chunk_size_max);
 #endif
     if (settings.drop_privileges) {
         setup_privilege_violations_handler();
