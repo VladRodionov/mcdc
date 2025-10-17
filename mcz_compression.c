@@ -951,7 +951,7 @@ ssize_t mcz_maybe_decompress(const char *value,
 
         return -ENOMEM;
     }
-    
+
     /* 4. Decompress ---------------------------------------------- */
     ssize_t dec = mcz_decompress(value, value_sz, dst, expect, did);
 
@@ -1034,14 +1034,14 @@ prefill_stats_snapshot_ns(mcz_stats_snapshot_t *snapshot, const char *ns, size_t
     if (tab && meta){
         snapshot->dict_id   = meta->id;
         snapshot->dict_size = meta->dict_size;
-        
+
         /* total dicts configured for this ns */
         {
             int found = 0;
             for (size_t i = 0; i < tab->nspaces; i++) {
                 mcz_ns_entry_t *sp = tab->spaces[i];
                 if (!sp || !sp->ndicts || !sp->prefix) continue;
-                
+
                 size_t plen = strlen(sp->prefix);
                 if (plen == ns_sz && memcmp(ns, sp->prefix, plen) == 0) {
                     snapshot->total_dicts = sp->ndicts;

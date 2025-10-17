@@ -326,7 +326,7 @@ static void _storage_get_item_cb(void *e, obj_io *io, int ret) {
                         protocol_binary_response_header *header =
                             (protocol_binary_response_header *)resp->wbuf;
                         uint32_t body_len = ntohl(header->response.bodylen);
-                        body_len += expect - crlf - compLen;
+                        body_len += expect - compLen;
                         header->response.bodylen = htonl(body_len);
                     }
                     p->io_ctx.len = ntotal;
@@ -341,7 +341,7 @@ static void _storage_get_item_cb(void *e, obj_io *io, int ret) {
                         }
                     } else {
                         resp->iov[p->iovec_data].iov_len = expect - crlf;
-                        resp->tosend += (expect - crlf - compLen);
+                        resp->tosend += (expect - compLen);
                     }
                 }
             }

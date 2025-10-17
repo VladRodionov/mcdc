@@ -188,7 +188,7 @@ void mcz_init_default_config(void) {
     g_cfg.spool_max_bytes       = MCZ_DEFAULT_SPOOL_MAX_BYTES;
     g_cfg.compress_keys         = MCZ_DEFAULT_COMPRESS_KEYS;
     g_cfg.verbose               = MCZ_DEFAULT_VERBOSE;
-    
+
     inited = true;
 }
 
