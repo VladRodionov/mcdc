@@ -4,7 +4,7 @@
 ⚡ **For Those About to Cache (We Salute You!)** 🤘🎸
 
 **MC/DC** (Memory Cache with Dictionary Compression) is a **drop-in replacement for Memcached 1.6.38+** with built-in 
-**Zstandard dictionary compression**, delivering up to 1.5×–2.5× better RAM efficiency without any client-side 
+**Zstandard dictionary compression**, delivering up to 1.5x – 3.0x better RAM efficiency without any client-side 
 changes. MC/DC is developed and maintained by [Carrot Data](https://github.com/carrotdata) — a project focused on practical, 
 SSD-friendly, memory-efficient caching technologies.
 
@@ -102,7 +102,7 @@ What We Know from Industry
 ### What to Expect from MC/DC
 
 MC/DC integrates this idea directly into the caching layer, so you can expect:
-- up to 1.5 × – 2.0 × memory savings on typical web-scale datasets
+- up to 1.5x – 3.0x memory savings on typical web-scale datasets
 - Negligible CPU overhead thanks to the use of Zstandard’s dictionary mode and adaptive training heuristics
 - Automatic adaptation — as your workload evolves, MC/DC retrains dictionaries and updates them without downtime
 - Compression ratios that outperform any client-side compression, because MC/DC compresses across similar objects, not just within each value
@@ -235,6 +235,8 @@ We compared MC/DC under two configurations:
 enable_comp=true, enable_dict=false — only standard Zstandard (zstd) compression is used, effectively emulating client-side compression.
 - With dictionary compression:
 enable_comp=true, enable_dict=true — full dictionary-based compression is enabled, allowing MCDC to automatically train and apply shared dictionaries.
+
+Dictionary size= 256Kb, for each dataset
 
 The results are summarized in Table 1 below.
 
