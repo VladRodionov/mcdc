@@ -143,12 +143,13 @@ Supported toolchains:
 
 Tested on Linux (x86-64 / aarch64) and macOS (arm64 / x86-64)
 
-## ⚙️ Build
+## Build
 
 ```
 git clone https://github.com/VladRodionov/mcdc.git
 cd mcdc
-git checkout mcdc
+git fetch --all --tags       # Make sure you have all tags
+git checkout 1.6.38-mcdc-dev
 ```
 
 Linux(Ubuntu):
