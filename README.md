@@ -1,3 +1,4 @@
+[**Documentation**](https://github.com/VladRodionov/mcdc/wiki/Quick-Start-Guide) ⚡⚡⚡ [**Forum**](https://github.com/VladRodionov/mcdc/discussions)
 
 # MC/DC — Memory Cache with Dictionary Compression
 
