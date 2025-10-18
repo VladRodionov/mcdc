@@ -143,7 +143,7 @@ Supported toolchains:
 
 Tested on Linux (x86-64 / aarch64) and macOS (arm64 / x86-64)
 
-## ⚙️ Build
+## Build
 
 ```
 git clone https://github.com/VladRodionov/mcdc.git
