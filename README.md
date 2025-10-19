@@ -68,7 +68,7 @@ They introduced it under the name “Managed Compression” in a 2018 engineerin
 > Our caches can store up to 40 percent more data using the same hardware.”
 — Facebook Engineering Blog, 2018
 
-In MC/DC these "self-similar" categories are called "namespaces". See Documentation for more information.
+In MC/DC these "self-similar" categories are called "namespaces". See [Quick Start Guide](https://github.com/VladRodionov/mcdc/wiki/Quick-Start-Guide) for more information.
 
 ## How MC/DC Differs
 
