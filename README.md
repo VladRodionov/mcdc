@@ -5,8 +5,8 @@
 ⚡ **For Those About to Cache (We Salute You!)** 🤘🎸
 
 **MC/DC** (Memory Cache with Dictionary Compression) is a **drop-in replacement for Memcached 1.6.38+** with built-in 
-**Zstandard dictionary compression**, delivering up to 1.5x – 3.0x better RAM efficiency without any client-side 
-changes. MC/DC is developed and maintained by [Carrot Data](https://github.com/carrotdata) — a project focused on practical, 
+**Zstandard dictionary compression**, delivering up to 1.5×–2.5× better RAM efficiency without any client-side 
+changes. MC/DC is developed and maintained by a former co-founder of [Carrot Data](https://github.com/carrotdata) — a project focused on practical, 
 SSD-friendly, memory-efficient caching technologies.
 
 ## What Is MC/DC?
@@ -103,7 +103,7 @@ What We Know from Industry
 ### What to Expect from MC/DC
 
 MC/DC integrates this idea directly into the caching layer, so you can expect:
-- up to 1.5x – 3.0x memory savings on typical web-scale datasets
+- up to 1.5 × – 2.0 × memory savings on typical web-scale datasets
 - Negligible CPU overhead thanks to the use of Zstandard’s dictionary mode and adaptive training heuristics
 - Automatic adaptation — as your workload evolves, MC/DC retrains dictionaries and updates them without downtime
 - Compression ratios that outperform any client-side compression, because MC/DC compresses across similar objects, not just within each value
@@ -238,8 +238,6 @@ enable_comp=true, enable_dict=false — only standard Zstandard (zstd) compressi
 - With dictionary compression:
 enable_comp=true, enable_dict=true — full dictionary-based compression is enabled, allowing MCDC to automatically train and apply shared dictionaries.
 
-Dictionary size= 256Kb, for each dataset
-
 The results are summarized in Table 1 below.
 
 **Table 1. Memory footprint per dataset (lower is better) and relative efficiency gain of MCDC vs Memcached.**
@@ -279,15 +277,17 @@ still finds patterns in places humans don’t.
 MC/DC is released under the Apache 2.0 License. It includes and extends Memcached 1.6.38, which is distributed under a BSD-style license.
 All trademarks and copyrights remain with their respective owners.
 
-## Acknowledgements
+## Get Involved
 
-MC/DC builds upon two decades of exceptional work by the Memcached open-source community. Special thanks to the maintainers for keeping 
-Memcached simple, fast, and stable — making it a perfect foundation for further innovation.
+MC/DC is an independent open-source initiative focused on bringing **dictionary-based compression** and **memory-efficiency analytics** to production-grade caching systems.  
+It has been designed, implemented, and tested with great attention to performance, compatibility, and practical integration with tools like Memcached.
 
-Developed with ❤️ by Vlad Rodionov vladrodionov@gmail.com
+This project represents many months of engineering and research effort — from low-level Zstandard optimization to dictionary lifecycle management and cross-platform benchmarking.  
+It demonstrates that memory efficiency and speed can coexist in open infrastructure software.
 
-My other projects: [Carrot Data](https://www.github.com/carrotdata) “Cache Smart, Save More.”
+If you find MC/DC useful, inspiring, or relevant to your work, there are several ways to get involved:
+1. **Contribute ideas or feedback** — share your experiences, feature suggestions, or use cases.
+2. **Collaborate on proof-of-concept (POC) projects** — help validate MC/DC in real-world environments.
+3. **Engage professionally** — sponsored features, consulting, or performance tuning work are all welcome.
 
-© 2025 Vladimir Rodionov. All rights reserved.
-
-
+Your participation, feedback, or collaboration will help shape the roadmap. Every contribution, whether technical or professional, 
