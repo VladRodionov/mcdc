@@ -251,6 +251,8 @@ The results are summarized in Table 1 below.
 *Notes:* “Efficiency gain” is computed as **(memcached / mcdc – 1)*100%**.  
 Values are in GBs (e.g., memory bytes per dataset); smaller numbers indicate better efficiency.
 
+![Benchmark chart](https://github.com/user-attachments/assets/d8ad1729-bfd7-48fd-8712-de31f6461b85)
+
 ### Quick analysis
 
 - **Overall:** MCDC typically delivers **~1.8–1.9×** better memory efficiency (geometric mean ≈ **1.85×**).  
