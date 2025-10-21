@@ -6,7 +6,7 @@
 
 **MC/DC** (Memory Cache with Dictionary Compression) is a **drop-in replacement for Memcached 1.6.38+** with built-in 
 **Zstandard dictionary compression**, delivering up to 1.5×–2.5× better RAM efficiency without any client-side 
-changes. MC/DC is developed and maintained by [Carrot Data](https://github.com/carrotdata) — a project focused on practical, 
+changes. MC/DC is developed and maintained by a former co-founder of [Carrot Data](https://github.com/carrotdata) — a project focused on practical, 
 SSD-friendly, memory-efficient caching technologies.
 
 ## What Is MC/DC?
@@ -276,6 +276,24 @@ still finds patterns in places humans don’t.
 
 MC/DC is released under the Apache 2.0 License. It includes and extends Memcached 1.6.38, which is distributed under a BSD-style license.
 All trademarks and copyrights remain with their respective owners.
+
+## Get Involved
+
+MC/DC is an independent open-source initiative focused on bringing **dictionary-based compression** and **memory-efficiency analytics** to production-grade caching systems.  
+It has been designed, implemented, and tested with great attention to performance, compatibility, and practical integration with tools like Memcached.
+
+This project represents many months of engineering and research effort — from low-level Zstandard optimization to dictionary lifecycle management and cross-platform benchmarking.  
+It demonstrates that memory efficiency and speed can coexist in open infrastructure software.
+
+If you find MC/DC useful, inspiring, or relevant to your work, there are several ways to get involved:
+1. **Contribute ideas or feedback** — share your experiences, feature suggestions, or use cases.
+2. **Collaborate on proof-of-concept (POC) projects** — help validate MC/DC in real-world environments.
+3. **Engage professionally** — sponsored features, consulting, or performance tuning work are all welcome.
+
+Your participation, feedback, or collaboration will help shape the roadmap. Every contribution, whether technical or professional, 
+helps move the open-source caching ecosystem forward.  
+
+**Reach out:** [GitHub](https://www.github.com/VladRodionov) • [LinkedIn](https://www.linkedin.com/in/vladrodionov) • [Email](vladrodionov@gmail.com)
 
 ## Acknowledgements
 
