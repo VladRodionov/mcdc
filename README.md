@@ -293,3 +293,17 @@ If you find MC/DC useful, inspiring, or relevant to your work, there are several
 3. **Engage professionally** — sponsored features, consulting, or performance tuning work are all welcome.
 
 Your participation, feedback, or collaboration will help shape the roadmap. Every contribution, whether technical or professional, 
+helps move the open-source caching ecosystem forward.  
+
+**Reach out:** [GitHub](https://www.github.com/VladRodionov) • [LinkedIn](https://www.linkedin.com/in/vladrodionov) • [Email](vladrodionov@gmail.com)
+
+## Acknowledgements
+
+MC/DC builds upon two decades of exceptional work by the Memcached open-source community. Special thanks to the maintainers for keeping 
+Memcached simple, fast, and stable — making it a perfect foundation for further innovation.
+
+Developed with ❤️ by Vlad Rodionov vladrodionov@gmail.com
+
+My other projects: [Carrot Data](https://www.github.com/carrotdata) “Cache Smart, Save More.”
+
+© 2025 Vladimir Rodionov. All rights reserved.
