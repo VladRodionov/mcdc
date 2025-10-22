@@ -100,17 +100,6 @@ static inline void u32le(uint32_t v, unsigned char out[4]) {
     out[3] = (unsigned char)((v >> 24) & 0xFF);
 }
 
-static int write_all(int fd, const void *buf, size_t len) {
-    const unsigned char *p = (const unsigned char *)buf;
-    size_t off = 0;
-    while (off < len) {
-        ssize_t w = write(fd, p + off, len - off);
-        if (w < 0) { if (errno == EINTR) continue; return -1; }
-        off += (size_t)w;
-    }
-    return 0;
-}
-
 static int make_path(char *dst, size_t cap, const char *dir, time_t t) {
     if (!dst || cap == 0) return -EINVAL;
     memset(dst, 0, cap);   // <-- zero it first
@@ -127,67 +116,7 @@ static int make_path(char *dst, size_t cap, const char *dir, time_t t) {
                      tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
     return (n < 0 || (size_t)n >= cap) ? -1 : 0;
 }
-/* -------- Buffered writer to reduce write() syscalls -------- */
 
-typedef struct {
-    int     fd;
-    uint8_t *buf;
-    size_t  cap;
-    size_t  used;
-} bufw_t;
-
-static int bufw_init(bufw_t *w, int fd, size_t cap) {
-    if (!w) return -EINVAL;
-    w->fd = fd;
-    w->buf = (uint8_t*)malloc(cap);
-    if (!w->buf) return -ENOMEM;
-    w->cap = cap;
-    w->used = 0;
-    return 0;
-}
-
-static int bufw_flush(bufw_t *w) {
-    if (!w || w->fd < 0) return -EINVAL;
-    size_t to_write = w->used;
-    const uint8_t *p = w->buf;
-    while (to_write) {
-        ssize_t n = write(w->fd, p, to_write);
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            return n;
-        }
-        p += (size_t)n;
-        to_write -= (size_t)n;
-    }
-    w->used = 0;
-    return 0;
-}
-
-static int bufw_write(bufw_t *w, const void *data, size_t len) {
-    if (!w || w->fd < 0) return -EINVAL;
-    const uint8_t *p = (const uint8_t*)data;
-    /* Fast path: fits into buffer */
-    if (len <= (w->cap - w->used)) {
-        memcpy(w->buf + w->used, p, len);
-        w->used += len;
-        return 0;
-    }
-    /* Fill, flush, then if large chunk, write direct, else buffer remainder */
-    if (w->used && bufw_flush(w) != 0) return -1;
-    if (len >= w->cap) {
-        /* Too large: write through */
-        return write_all(w->fd, data, len);
-    }
-    memcpy(w->buf, p, len);
-    w->used = len;
-    return 0;
-}
-
-static void bufw_destroy(bufw_t *w) {
-    if (!w) return;
-    if (w->buf) { (void)bufw_flush(w); free(w->buf); }
-    w->buf = NULL; w->cap = w->used = 0; w->fd = -1;
-}
 /* ---------------------- Thread ---------------------- */
 
 static void free_list(full_sample_node_t *n) {
@@ -198,6 +127,22 @@ static void free_list(full_sample_node_t *n) {
         free(n);
         n = nx;
     }
+}
+
+/* helper: write-all with stdio (loops until all bytes buffered or error) */
+static int fwrite_all(FILE *fp, const void *buf, size_t len) {
+    const unsigned char *p = (const unsigned char *)buf;
+    while (len) {
+        size_t n = fwrite(p, 1, len, fp);
+        if (n == 0) {
+            if (ferror(fp)) return -1;
+            /* fwrite returned 0 but no error: treat as fatal to avoid spin */
+            return -1;
+        }
+        p   += n;
+        len -= n;
+    }
+    return 0;
 }
 
 static void *sampler_main(void *arg) {
@@ -211,62 +156,66 @@ static void *sampler_main(void *arg) {
         }
     }
 
-    /* Open file */
+    /* Build path */
     time_t start = time(NULL);
     if (make_path(g_path, sizeof(g_path), g_cfg.spool_dir, start) != 0) {
         g_path[0] = '\0';
         atomic_store_explicit(&g_running, false, memory_order_release);
         return NULL;
     }
+
+    /* Open low-level FD with CLOEXEC, then wrap with FILE* */
     int fd = open(g_path, O_CREAT | O_TRUNC | O_WRONLY | O_CLOEXEC, 0644);
     if (fd < 0) {
         g_path[0] = '\0';
         atomic_store_explicit(&g_running, false, memory_order_release);
         return NULL;
     }
-
-    /* Buffered writer */
-    bufw_t bw;
-    if (bufw_init(&bw, fd, 1u << 20) != 0) {
+    FILE *fp = fdopen(fd, "wb");
+    if (!fp) {
         close(fd);
         g_path[0] = '\0';
         atomic_store_explicit(&g_running, false, memory_order_release);
         return NULL;
     }
 
+    /* 1 MiB fully-buffered stream (tweak as desired) */
+    //static const size_t kBufSize = 1u << 20;
+    (void)setvbuf(fp, NULL, _IOFBF, 1u << 16);
+
     atomic_store_explicit(&g_written, 0, memory_order_release);
 
-    const size_t cap = g_cfg.spool_max_bytes ? g_cfg.spool_max_bytes : ((size_t)64 * 1024 * 1024);
+    const size_t cap = g_cfg.spool_max_bytes ? g_cfg.spool_max_bytes
+                                             : ((size_t)64 * 1024 * 1024);
     const struct timespec ts = { .tv_sec = 0, .tv_nsec = 10 * 1000 * 1000 }; /* 10ms */
     full_sample_node_t *lst = NULL, *cur = NULL;
 
     bool time_limit_enabled = g_cfg.sample_window_sec > 0;
+
     while (atomic_load_explicit(&g_running, memory_order_acquire)) {
         cur = NULL; lst = NULL;
+
         if (time_limit_enabled) {
             time_t _now = time(NULL);
             if ((int)difftime(_now, start) >= g_cfg.sample_window_sec) {
                 goto stop;
             }
         }
+
         lst = mpsc_drain();
         if (!lst) { nanosleep(&ts, NULL); continue; }
 
         lst = reverse_list(lst);
+
         for (cur = lst; cur; ) {
             if (cur->klen <= UINT32_MAX && cur->vlen <= UINT32_MAX) {
                 unsigned char hdr[8];
                 u32le((uint32_t)cur->klen, hdr + 0);
                 u32le((uint32_t)cur->vlen, hdr + 4);
-                if (bufw_write(&bw, hdr, 8) != 0) {
-                    goto io_error;
-                }
-                if (cur->klen && bufw_write(&bw, cur->key, cur->klen) != 0) {
-                    goto io_error;
-                }
-                if (cur->vlen && bufw_write(&bw, cur->val, cur->vlen) != 0) {
-                    goto io_error;
-                }
+
+                if (fwrite_all(fp, hdr, sizeof(hdr)) != 0) goto io_error;
+                if (cur->klen && fwrite_all(fp, cur->key, cur->klen) != 0) goto io_error;
+                if (cur->vlen && fwrite_all(fp, cur->val, cur->vlen) != 0) goto io_error;
 
                 size_t inc = 8 + cur->klen + cur->vlen;
                 size_t total = atomic_fetch_add_explicit(&g_written, inc, memory_order_acq_rel) + inc;
@@ -274,6 +223,7 @@ static void *sampler_main(void *arg) {
                     goto stop;
                 }
             }
+
             full_sample_node_t *nx = cur->next;
             if (cur->key) free(cur->key);
             if (cur->val) free(cur->val);
@@ -282,21 +232,20 @@ static void *sampler_main(void *arg) {
         }
     }
 
-    (void)bufw_flush(&bw);
-    bufw_destroy(&bw);
-    if (fd >= 0) { close(fd); fd = -1; }
+    /* Normal shutdown */
+    (void)fflush(fp);
+    (void)fclose(fp); /* also closes underlying fd */
     return NULL;
 
-
 io_error:
-    perror("mcz:sampler write");
+    perror("mcz:sampler fwrite");
 stop:
-    (void)bufw_flush(&bw);
-    bufw_destroy(&bw);
-    if (fd >= 0) { close(fd); fd = -1; }
+    (void)fflush(fp);
+    (void)fclose(fp);
 
     atomic_store_explicit(&g_collected, 0, memory_order_release);
     atomic_store_explicit(&g_running, false, memory_order_release);
+
     /* free leftovers from current batch */
     while (cur) {
         full_sample_node_t *nx = cur->next;
@@ -307,6 +256,7 @@ stop:
     }
     return NULL;
 }
+
 /* ---------------------- Public API ---------------------- */
 
 int mcz_sampler_init(const char *spool_dir,
