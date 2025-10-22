@@ -9,7 +9,7 @@
 changes. MC/DC is developed and maintained by a former co-founder of [Carrot Data](https://github.com/carrotdata) — a project focused on practical, 
 SSD-friendly, memory-efficient caching technologies.
 
-⚠️ Important: This is still experimantal work. First public release is the Developer Preview only. 
+⚠️ Important: This is still an experimantal work. First public release is the Developer Preview only. 
 
 ## What Is MC/DC?
 
