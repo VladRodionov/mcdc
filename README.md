@@ -236,7 +236,7 @@ of the tests and workloads, please refer to the original benchmark repository (l
 
 > For datasets and benchmark desriptions please refer to the original [**membench**](https://github.com/carrotdata/membench) repo.
 
-We compared MC/DC under two configurations:
+Two MC/DC configurations have been compared:
 - Without dictionary compression:
 enable_comp=true, enable_dict=false — only standard Zstandard (zstd) compression is used, effectively emulating client-side compression.
 - With dictionary compression:
@@ -290,9 +290,10 @@ All trademarks and copyrights remain with their respective owners.
 
 ## Get Involved
 
-MC/DC is an independent open-source initiative focused on bringing **dictionary-based compression** and **memory-efficiency analytics** to production-grade caching systems.  
-This project represents many months of engineering and research effort — from low-level Zstandard optimization to dictionary lifecycle management and cross-platform benchmarking.  
-It demonstrates that memory efficiency and speed can coexist in open infrastructure software.
+MC/DC is an independent open-source initiative focused on bringing **dictionary-based compression** and **memory-efficiency analytics** 
+to production-grade caching systems. This project represents many months of engineering and research effort — from low-level Zstandard 
+optimization to dictionary lifecycle management and cross-platform benchmarking. It demonstrates that memory efficiency and speed can 
+coexist in open infrastructure software.
 
 If you find MC/DC useful or relevant to your work, there are several ways to get involved:
 1. **Contribute ideas or feedback** — share your experiences, feature suggestions, or use cases.
