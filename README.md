@@ -9,6 +9,8 @@
 changes. MC/DC is developed and maintained by a former co-founder of [Carrot Data](https://github.com/carrotdata) — a project focused on practical, 
 SSD-friendly, memory-efficient caching technologies.
 
+⚠️ Important: This is still experimantal work. First public release is the Developer Preview only. 
+
 ## What Is MC/DC?
 
 MC/DC **extends Memcached** with adaptive, server-side data compression.  Instead of compressing 
@@ -232,6 +234,8 @@ This section includes reproducible [**membench**](https://github.com/carrotdata/
 Memcached 1.6.38 vs MC/DC under multiple datasets (tweets, JSON objects, and mixed workloads). For detailed descriptions 
 of the tests and workloads, please refer to the original benchmark repository (link above).
 
+> For datasets and benchmark desriptions please refer to the original [**membench**](https://github.com/carrotdata/membench) repo.
+
 We compared MC/DC under two configurations:
 - Without dictionary compression:
 enable_comp=true, enable_dict=false — only standard Zstandard (zstd) compression is used, effectively emulating client-side compression.
@@ -260,6 +264,11 @@ Values are in GBs (e.g., memory bytes per dataset); smaller numbers indicate bet
 - **Moderate cases:** **amazon (+35%)** and **ohio (+36%)** still see meaningful gains, indicating some cross-object redundancy.  
 - **Averages:** Baseline average = **16.62**, MCDC average = **9.21** → ~**44.6%** absolute reduction in average footprint.
 
+>⚠️ Take these results with a grain of salt.
+>Although the datasets used in these benchmarks are real (not synthetic), they may not perfectly represent your own workloads — your mileage may vary (YMMV).
+>The only publicly credible efficiency figure I’m aware of comes from the Facebook Engineering Blog, reporting about +40% memory efficiency increase
+>(40% more data stored in a same amount of memory). Depending on your data patterns, you may see more — or less.
+  
 ## Funny and Curious Moments During Development
 
 Developing MC/DC wasn’t just compression ratios and profiler traces — there were some fun surprises:
@@ -282,12 +291,10 @@ All trademarks and copyrights remain with their respective owners.
 ## Get Involved
 
 MC/DC is an independent open-source initiative focused on bringing **dictionary-based compression** and **memory-efficiency analytics** to production-grade caching systems.  
-It has been designed, implemented, and tested with great attention to performance, compatibility, and practical integration with tools like Memcached.
-
 This project represents many months of engineering and research effort — from low-level Zstandard optimization to dictionary lifecycle management and cross-platform benchmarking.  
 It demonstrates that memory efficiency and speed can coexist in open infrastructure software.
 
-If you find MC/DC useful, inspiring, or relevant to your work, there are several ways to get involved:
+If you find MC/DC useful or relevant to your work, there are several ways to get involved:
 1. **Contribute ideas or feedback** — share your experiences, feature suggestions, or use cases.
 2. **Collaborate on proof-of-concept (POC) projects** — help validate MC/DC in real-world environments.
 3. **Engage professionally** — sponsored features, consulting, or performance tuning work are all welcome.
