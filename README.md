@@ -151,7 +151,7 @@ Tested on Linux (x86-64 / aarch64) and macOS (arm64 / x86-64)
 git clone https://github.com/VladRodionov/mcdc.git
 cd mcdc
 git fetch --all --tags       # Make sure you have all tags
-git checkout 1.6.38-mcdc-dev
+git checkout 1.6.38-mcdc-dev2
 ```
 
 Linux(Ubuntu):
