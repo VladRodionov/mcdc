@@ -85,8 +85,6 @@ While Facebook’s *Managed Compression* was a pioneering concept, **MC/DC** tak
 | Availability | Proprietary (internal to Facebook) | 100% open-source |
 | Deployment Complexity | Requires coordination with an external system | Drop-in replacement for Memcached — no dependencies |
 
-### Why It Matters
-
 By embedding training, monitoring, and dictionary management directly inside the cache, MC/DC eliminates the need for any external coordination service — achieving
 the benefits of Managed Compression with zero infrastructure overhead.
 
