@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 /*
- * mcz_cmd.c - Implementation of MCZ command extensions for memcached.
+ * mcdc_cmd.c - Implementation of MC/DC command extensions for memcached.
  *
  * This file adds support for custom ASCII commands:
  *
@@ -51,10 +51,10 @@
 #include <stdlib.h>
 #include <arpa/inet.h>
 
-#include "mcz_cmd.h"
-#include "mcz_config.h"
+#include "mcdc_cmd.h"
+#include "mcdc_config.h"
 
-#include "mcz_sampling.h"
+#include "mcdc_sampling.h"
 #include "proto_bin.h"
 
 #define COMMAND_TOKEN 0
@@ -62,10 +62,10 @@
 
 
 /* Map train mode to string */
-static const char *train_mode_str(mcz_train_mode_t m) {
+static const char *train_mode_str(mcdc_train_mode_t m) {
     switch (m) {
-    case MCZ_TRAIN_FAST:     return "FAST";
-    case MCZ_TRAIN_OPTIMIZE: return "OPTIMIZE";
+    case MCDC_TRAIN_FAST:     return "FAST";
+    case MCDC_TRAIN_OPTIMIZE: return "OPTIMIZE";
     default:                 return "UNKNOWN";
     }
 }
@@ -74,7 +74,7 @@ static inline const char *b2s(bool v) { return v ? "true" : "false"; }
 
 
 /* ---------- mcdc sampler status ---------- */
-static int sampler_status_ascii(char *buf, size_t cap, mcz_sampler_status_t *st) {
+static int sampler_status_ascii(char *buf, size_t cap, mcdc_sampler_status_t *st) {
     int n = snprintf(buf, cap,
         "MCDC-SAMPLER configured %s\r\n"
         "MCDC-SAMPLER running %s\r\n"
@@ -91,7 +91,7 @@ static int sampler_status_ascii(char *buf, size_t cap, mcz_sampler_status_t *st)
     return n;
 }
 
-static int sampler_status_json(char *buf, size_t cap, mcz_sampler_status_t *st){
+static int sampler_status_json(char *buf, size_t cap, mcdc_sampler_status_t *st){
     int n = snprintf(buf, cap,
         "{\r\n"
           "\"configured\": %s,\r\n"
@@ -110,8 +110,8 @@ static int sampler_status_json(char *buf, size_t cap, mcz_sampler_status_t *st){
 }
 
 static int build_sampler_status(char **outp, size_t *lenp, int json) {
-    mcz_sampler_status_t st;
-    mcz_sampler_get_status(&st);
+    mcdc_sampler_status_t st;
+    mcdc_sampler_get_status(&st);
     size_t cap = 2048;
     char *buf = (char*)malloc(cap);
     if (!buf) return -1;
@@ -131,13 +131,13 @@ static int build_sampler_status(char **outp, size_t *lenp, int json) {
 }
 
 /* ---------- ASCII: mcdc sampler ... ---------- */
-static void handle_mcz_sampler_ascii(conn *c, token_t *tokens, size_t ntokens) {
+static void handle_mcdc_sampler_ascii(conn *c, token_t *tokens, size_t ntokens) {
     if (ntokens < 4 || ntokens > 5) { out_string(c, "CLIENT_ERROR usage: mcdc sampler <start|stop|status> [json]"); return; }
     const char *verb = tokens[COMMAND_TOKEN + 2].value;
 
     if (strcmp(verb, "start") == 0) {
         if (ntokens != 4) { out_string(c, "CLIENT_ERROR usage: mcdc sampler <start|stop|status> [json]"); return; }
-        int rc = mcz_sampler_start();
+        int rc = mcdc_sampler_start();
         if (rc == 0) {
             out_string(c, "STARTED\r\n");
         } else if (rc == 1) {
@@ -151,7 +151,7 @@ static void handle_mcz_sampler_ascii(conn *c, token_t *tokens, size_t ntokens) {
     } else if (strcmp(verb, "stop") == 0) {
         if (ntokens != 4) { out_string(c, "CLIENT_ERROR usage: mcdc sampler <start|stop|status> [json]"); return; }
 
-        int rc = mcz_sampler_stop();
+        int rc = mcdc_sampler_stop();
         if (rc == 0) {
             out_string(c, "STOPPED\r\n");
         } else if (rc == 1) {
@@ -183,7 +183,7 @@ static void handle_mcz_sampler_ascii(conn *c, token_t *tokens, size_t ntokens) {
 
 /* ----------  mcdc reload ... ------------*/
 
-static int reload_status_ascii(char *buf, size_t cap, mcz_reload_status_t *st) {
+static int reload_status_ascii(char *buf, size_t cap, mcdc_reload_status_t *st) {
     int n;
     if (st->rc == 0) {
         n = snprintf(buf, cap,
@@ -222,7 +222,7 @@ static int reload_status_ascii(char *buf, size_t cap, mcz_reload_status_t *st) {
     return n;
 }
 
-static int reload_status_json(char *buf, size_t cap, mcz_reload_status_t *st) {
+static int reload_status_json(char *buf, size_t cap, mcdc_reload_status_t *st) {
     int n;
     if (st->rc == 0) {
         n = snprintf(buf, cap,
@@ -266,7 +266,7 @@ static int reload_status_json(char *buf, size_t cap, mcz_reload_status_t *st) {
 
 static int build_reload_status(char **outp, size_t *lenp, int json) {
 
-    mcz_reload_status_t *st = mcz_reload_dictionaries();
+    mcdc_reload_status_t *st = mcdc_reload_dictionaries();
     if (!st) {
         return -1;
     }
@@ -290,7 +290,7 @@ static int build_reload_status(char **outp, size_t *lenp, int json) {
 }
 
 /* ----------  mcdc config ... ------------*/
-static int cfg_ascii(char *buf, size_t cap, mcz_cfg_t *c) {
+static int cfg_ascii(char *buf, size_t cap, mcdc_cfg_t *c) {
     if (!c) return -1;
 
     const char *dict_dir = c->dict_dir ? c->dict_dir : "";
@@ -346,7 +346,7 @@ static int cfg_ascii(char *buf, size_t cap, mcz_cfg_t *c) {
     return n;
 }
 
-static int cfg_json(char *buf, size_t cap, mcz_cfg_t *c) {
+static int cfg_json(char *buf, size_t cap, mcdc_cfg_t *c) {
     if (!c) return -1;
 
     /* crude escape: assume paths don’t contain embedded quotes/newlines;
@@ -406,7 +406,7 @@ static int cfg_json(char *buf, size_t cap, mcz_cfg_t *c) {
 }
 
 static int build_cfg(char **outp, size_t *lenp, int json) {
-    mcz_cfg_t *c = mcz_config_get();
+    mcdc_cfg_t *c = mcdc_config_get();
     if (!c) return -1;
 
     size_t cap = 2048;
@@ -431,7 +431,7 @@ static int build_cfg(char **outp, size_t *lenp, int json) {
 /*    mcdc stats ... */
 
 static int build_stats_ascii(char **outp, size_t *lenp,
-                                const char *ns, const mcz_stats_snapshot_t *s)
+                                const char *ns, const mcdc_stats_snapshot_t *s)
 {
     /* Reserve a reasonable buffer; grow if needed. */
     size_t cap = 4096;
@@ -495,7 +495,7 @@ static int build_stats_ascii(char **outp, size_t *lenp,
 }
 
 static int build_stats_json(char **outp, size_t *lenp,
-                               const char *ns, const mcz_stats_snapshot_t *s)
+                               const char *ns, const mcdc_stats_snapshot_t *s)
 {
     size_t cap = 4096;
     char *buf = malloc(cap);
@@ -569,7 +569,7 @@ static int build_stats_json(char **outp, size_t *lenp,
 */
 static int build_ns_ascii(char **outp, size_t *lenp) {
     size_t n = 0, i;
-    const char **list = mcz_list_namespaces(&n);   /* may return NULL or contain NULLs */
+    const char **list = mcdc_list_namespaces(&n);   /* may return NULL or contain NULLs */
 
     /* First pass: compute size */
     size_t total = 0;
@@ -607,7 +607,7 @@ static int build_ns_ascii(char **outp, size_t *lenp) {
 
 /* Text protocol main entry point */
 
-void process_mcz_command_ascii(conn *c, token_t *tokens, const size_t ntokens)
+void process_mcdc_command_ascii(conn *c, token_t *tokens, const size_t ntokens)
 {
 
     if (ntokens < 3 || strcmp(tokens[COMMAND_TOKEN].value, "mcdc") != 0) {
@@ -619,7 +619,7 @@ void process_mcz_command_ascii(conn *c, token_t *tokens, const size_t ntokens)
 
     /* --- mcz sampler  --- */
     if (strcmp(sub, "sampler") == 0) {
-        handle_mcz_sampler_ascii(c, tokens, ntokens);
+        handle_mcdc_sampler_ascii(c, tokens, ntokens);
         return;
     }
 
@@ -721,13 +721,13 @@ void process_mcz_command_ascii(conn *c, token_t *tokens, const size_t ntokens)
     }
 
     /* Build snapshot */
-    mcz_stats_snapshot_t snap;
+    mcdc_stats_snapshot_t snap;
     memset(&snap, 0, sizeof(snap));
     size_t nlen = ns ? strlen(ns) : 0;
-    int rc = mcz_get_stats_snapshot(&snap, ns, nlen);
+    int rc = mcdc_get_stats_snapshot(&snap, ns, nlen);
     if (rc < 0) {
         if (rc != -ENOENT){
-            out_string(c, "SERVER_ERROR mcz_get_stats_snapshot failed");
+            out_string(c, "SERVER_ERROR mcdc_get_stats_snapshot failed");
         } else {
             out_string(c, "CLIENT_ERROR namespace does not exist");
         }

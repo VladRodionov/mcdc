@@ -13,8 +13,8 @@
 
 #ifdef USE_ZSTD
 #include <zstd.h>
-#include "mcz_compression.h"
-#include "mcz_utils.h"
+#include "mcdc_compression.h"
+#include "mcdc_utils.h"
 #endif
 
 #define PAGE_BUCKET_DEFAULT 0
@@ -283,7 +283,7 @@ static void _storage_get_item_cb(void *e, obj_io *io, int ret) {
         if (expect == ZSTD_CONTENTSIZE_ERROR || expect == ZSTD_CONTENTSIZE_UNKNOWN){
             fprintf(stderr, "[mcz] decompress: corrupt frame (id=%u, compLen=%zu\n",
                     did, compLen);
-            mcz_report_decomp_err(ITEM_key(read_it), read_it->nkey);
+            mcdc_report_decomp_err(ITEM_key(read_it), read_it->nkey);
             miss = true;
         }
 
@@ -307,13 +307,13 @@ static void _storage_get_item_cb(void *e, obj_io *io, int ret) {
                 new_it->slabs_clsid = clsid;
                 new_it->nbytes = expect;
                 /* decompress into new_it */
-                ssize_t dsz = mcz_decompress(src, compLen, ITEM_data(new_it), ntotal, did);
+                ssize_t dsz = mcdc_decompress(src, compLen, ITEM_data(new_it), ntotal, did);
                 if (dsz <= 0) {
                     miss = true;
                     if (dsz == -EINVAL){
-                        mcz_report_dict_miss_err(ITEM_key(read_it), read_it->nkey);
+                        mcdc_report_dict_miss_err(ITEM_key(read_it), read_it->nkey);
                     } else {
-                        mcz_report_decomp_err(ITEM_key(read_it), read_it->nkey);
+                        mcdc_report_decomp_err(ITEM_key(read_it), read_it->nkey);
                     }
                 } else {
                     int crlf = 2;// value has \r\n at the end which is not needed in binary

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 /*
- * mcz_eff_atomic.c
+ * mcdc_eff_atomic.c
  *
  * "eff" stands for **efficiency**.
  *
@@ -38,12 +38,12 @@
  *     mutexes.
  *
  * Naming convention:
- *   - All functions/types prefixed with `mcz_eff_*` are part of this efficiency
+ *   - All functions/types prefixed with `mcdc_eff_*` are part of this efficiency
  *     tracking subsystem.
  */
-#include "mcz_eff_atomic.h"
-#include "mcz_stats.h"
-#include "mcz_utils.h"
+#include "mcdc_eff_atomic.h"
+#include "mcdc_stats.h"
+#include "mcdc_utils.h"
 
 /* ------- helpers ------- */
 static inline double clamp01(double x){ return x < 0.0 ? 0.0 : (x > 1.0 ? 1.0 : x); }
@@ -51,16 +51,16 @@ static inline uint64_t dbl2u64(double d){ uint64_t u; memcpy(&u,&d,sizeof u); re
 static inline double   u642dbl(uint64_t u){ double d; memcpy(&d,&u,sizeof d); return d; }
 
 /* ------- module-scoped config (read-only after configure) ------- */
-static mcz_train_cfg_t g_cfg;          /* not atomic; single-writer-before-readers */
+static mcdc_train_cfg_t g_cfg;          /* not atomic; single-writer-before-readers */
 static bool            g_cfg_set = false;
 
 /* ------- global tracker ------- */
-static mcz_eff_tracker_atomic_t g_eff;
+static mcdc_eff_tracker_atomic_t g_eff;
 
-mcz_eff_tracker_atomic_t *mcz_eff_instance(void) { return &g_eff; }
+mcdc_eff_tracker_atomic_t *mcdc_eff_instance(void) { return &g_eff; }
 
 /* Single-threaded configuration; after this, g_cfg is treated as immutable. */
-void mcz_eff_configure(const mcz_train_cfg_t *cfg)
+void mcdc_eff_configure(const mcdc_train_cfg_t *cfg)
 {
     g_cfg.enable_training = cfg->enable_training;
     g_cfg.retraining_interval_s = cfg->retraining_interval_s; /* seconds */
@@ -74,15 +74,15 @@ void mcz_eff_configure(const mcz_train_cfg_t *cfg)
     g_eff.alpha = g_cfg.ewma_alpha;
 }
 
-void mcz_eff_get_config(mcz_train_cfg_t *out_cfg)
+void mcdc_eff_get_config(mcdc_train_cfg_t *out_cfg)
 {
     if (!out_cfg) return;
     *out_cfg = g_cfg; /* plain copy; config is immutable after configure */
 }
 
-void mcz_eff_init(uint64_t now_s)
+void mcdc_eff_init(uint64_t now_s)
 {
-    /* Assume mcz_eff_configure() already called by a single thread */
+    /* Assume mcdc_eff_configure() already called by a single thread */
 
     atomic_store_explicit(&g_eff.ewma_bits, dbl2u64(0.0), memory_order_relaxed);
     atomic_store_explicit(&g_eff.baseline_bits, dbl2u64(0.0), memory_order_relaxed);
@@ -93,7 +93,7 @@ void mcz_eff_init(uint64_t now_s)
 }
 
 /* Hot path: relaxed increments + one CAS on a 64-bit word. */
-void mcz_eff_on_observation(size_t original_bytes,
+void mcdc_eff_on_observation(size_t original_bytes,
                                    size_t compressed_bytes)
 {
     if (original_bytes == 0) return;
@@ -129,7 +129,7 @@ void mcz_eff_on_observation(size_t original_bytes,
     }
 }
 
-bool mcz_eff_should_retrain(uint64_t now_s)
+bool mcdc_eff_should_retrain(uint64_t now_s)
 {
     if (!g_cfg.enable_training) { return false; }
 
@@ -158,7 +158,7 @@ bool mcz_eff_should_retrain(uint64_t now_s)
     bool trigger_up = rel <= -th;
     bool trigger_down = rel >= th;
     /* get statistics for "default" namespace*/
-    mcz_stats_atomic_t * stats = mcz_stats_lookup_by_ns("default", 7);
+    mcdc_stats_atomic_t * stats = mcdc_stats_lookup_by_ns("default", 7);
     if (trigger_up){
         if (stats) atomic_inc32(&stats->triggers_rise, 1);
     } else if (trigger_down){
@@ -177,7 +177,7 @@ static inline void baseline_fmin_trainer_only(double candidate) {
     atomic_store_explicit(&g_eff.baseline_bits, dbl2u64(newb), memory_order_release);
 }
 
-void mcz_eff_mark_retrained(uint64_t now_s)
+void mcdc_eff_mark_retrained(uint64_t now_s)
 {
     /* Trainer thread calls this after publishing new dict */
     double cur = u642dbl(atomic_load_explicit(&g_eff.ewma_bits, memory_order_acquire));
@@ -189,21 +189,21 @@ void mcz_eff_mark_retrained(uint64_t now_s)
 }
 
 /* 1. Return current EWMA as double */
-double mcz_eff_get_ewma(void)
+double mcdc_eff_get_ewma(void)
 {
     uint64_t bits = atomic_load_explicit(&g_eff.ewma_bits, memory_order_acquire);
     return u642dbl(bits);
 }
 
 /* 2. Return baseline as double */
-double mcz_eff_get_baseline(void)
+double mcdc_eff_get_baseline(void)
 {
     uint64_t bits = atomic_load_explicit(&g_eff.baseline_bits, memory_order_acquire);
     return u642dbl(bits);
 }
 
 /* 3. Return seconds since last training */
-uint64_t mcz_eff_last_train_seconds(void)
+uint64_t mcdc_eff_last_train_seconds(void)
 {
     uint64_t last = atomic_load_explicit(&g_eff.last_train_ts_s, memory_order_acquire);
     return last;

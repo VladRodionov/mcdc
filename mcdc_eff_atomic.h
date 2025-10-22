@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 /*
- * mcz_eff_atomic.h
+ * mcdc_eff_atomic.h
  *
  * Efficiency tracker ("eff") for compression dictionaries.
  *
@@ -30,11 +30,11 @@
  * Notes:
  *   - Baseline is non-increasing: it only improves with retraining.
  *   - Atomic-only design: no mutexes in the hot path.
- *   - Global singleton instance (like mcz_ctx): no need to pass a tracker
+ *   - Global singleton instance (like mcdc_ctx): no need to pass a tracker
  *     around.
  */
-#ifndef MCZ_EFF_ATOMIC_H
-#define MCZ_EFF_ATOMIC_H
+#ifndef MCDC_EFF_ATOMIC_H
+#define MCDC_EFF_ATOMIC_H
 
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -46,18 +46,18 @@
 extern "C" {
 #endif
 
-/* --- Config (owned by module; read-only after mcz_eff_configure) --- */
-typedef struct mcz_train_cfg_s {
+/* --- Config (owned by module; read-only after mcdc_eff_configure) --- */
+typedef struct mcdc_train_cfg_s {
     bool     enable_training;       /* enable online training */
     int64_t  retraining_interval_s; /* seconds */
     size_t   min_training_size;     /* bytes since last train */
     double   ewma_alpha;            /* 0..1 */
     double   retrain_drop;          /* 0..1 (relative increase threshold for ratio) */
-} mcz_train_cfg_t;
+} mcdc_train_cfg_t;
 
 /* --- Lock-free EWMA tracker (singleton) ---
  Tracks compression ratio = comp/orig (lower is better). */
-typedef struct mcz_eff_tracker_atomic_s {
+typedef struct mcdc_eff_tracker_atomic_s {
     _Atomic uint64_t ewma_bits;       /* bit-cast double EWMA */
     _Atomic uint64_t baseline_bits;   /* bit-cast double at last retrain */
     _Atomic bool     ewma_initialized;
@@ -66,35 +66,35 @@ typedef struct mcz_eff_tracker_atomic_s {
     _Atomic size_t   bytes_since_train;
 
     double alpha;                     /* cached from config at configure/init */
-} mcz_eff_tracker_atomic_t;
+} mcdc_eff_tracker_atomic_t;
 
 /* Access the singleton tracker (optional/testing). */
-mcz_eff_tracker_atomic_t *mcz_eff_instance(void);
+mcdc_eff_tracker_atomic_t *mcdc_eff_instance(void);
 
 /* --- Configuration (call once, single thread; afterwards read-only) --- */
-void mcz_eff_configure(const mcz_train_cfg_t *cfg);
+void mcdc_eff_configure(const mcdc_train_cfg_t *cfg);
 /* Optional: copy out the current config */
-void mcz_eff_get_config(mcz_train_cfg_t *out_cfg);
+void mcdc_eff_get_config(mcdc_train_cfg_t *out_cfg);
 
 /* --- Lifecycle & operations  --- */
-void mcz_eff_init(uint64_t now_s);
+void mcdc_eff_init(uint64_t now_s);
 
-void mcz_eff_on_observation(size_t original_bytes,
+void mcdc_eff_on_observation(size_t original_bytes,
                             size_t compressed_bytes);
 
-bool mcz_eff_should_retrain(uint64_t now_s);
+bool mcdc_eff_should_retrain(uint64_t now_s);
 
-void mcz_eff_mark_retrained(uint64_t now_s);
+void mcdc_eff_mark_retrained(uint64_t now_s);
 
-double mcz_eff_get_ewma(void);
+double mcdc_eff_get_ewma(void);
 
-double mcz_eff_get_baseline(void);
+double mcdc_eff_get_baseline(void);
 
-uint64_t mcz_eff_last_train_seconds(void);
+uint64_t mcdc_eff_last_train_seconds(void);
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#endif /* MCZ_EFF_ATOMIC_H */
+#endif /* MCDC_EFF_ATOMIC_H */
 

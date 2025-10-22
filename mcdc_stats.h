@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 /*
- * mcz_stats.h
+ * mcdc_stats.h
  *
  * Statistics subsystem for MC/DC (Memcached with Dictionary Compression).
  *
@@ -31,7 +31,7 @@
  *   - Rebuild replaces the namespace table when manifest changes occur.
  *
  * Naming convention:
- *   - All functions and types prefixed with `mcz_stats_*`.
+ *   - All functions and types prefixed with `mcdc_stats_*`.
  */
 #pragma once
 #include <stdatomic.h>
@@ -68,7 +68,7 @@ typedef struct {
     _Atomic uint64_t compress_errs, decompress_errs, dict_miss_errs;
     _Atomic uint64_t skipped_comp_min_size, skipped_comp_max_size, skipped_comp_incomp;
 
-} mcz_stats_atomic_t;
+} mcdc_stats_atomic_t;
 
 typedef struct {
     // scalar snapshot (non-atomic floats from detector)
@@ -93,60 +93,60 @@ typedef struct {
     uint64_t compress_errs, decompress_errs, dict_miss_errs;
     uint64_t skipped_comp_min_size, skipped_comp_max_size, skipped_comp_incomp;
 
-} mcz_stats_snapshot_t;
+} mcdc_stats_snapshot_t;
 
 /* Immutable entry ➜ points to shared stats block */
-typedef struct mcz_stats_ns_entry_s {
+typedef struct mcdc_stats_ns_entry_s {
     const char *name;                // owned by table (heap)
     size_t      name_len;            // cached length
-    mcz_stats_atomic_t *stats;       // owned separately; reused across rebuilds
-    struct mcz_stats_ns_entry_s *next;     // hash chain
-} mcz_stats_ns_entry_t;
+    mcdc_stats_atomic_t *stats;       // owned separately; reused across rebuilds
+    struct mcdc_stats_ns_entry_s *next;     // hash chain
+} mcdc_stats_ns_entry_t;
 
 /* Immutable hash table + refcount for RCU-lite */
-typedef struct mcz_ns_table_s {
+typedef struct mcdc_ns_table_s {
     _Atomic uint32_t refcnt;         // active readers on this table
     size_t nbuckets;
-    mcz_stats_ns_entry_t **buckets;        // array[nbuckets], chains are immutable
-} mcz_ns_table_t;
+    mcdc_stats_ns_entry_t **buckets;        // array[nbuckets], chains are immutable
+} mcdc_ns_table_t;
 
 /* Registry: one global pointer to current table */
 typedef struct {
-    _Atomic(mcz_ns_table_t *) cur;   // atomic pointer to immutable table
-    mcz_stats_atomic_t global;       // global stats (always present)
-    _Atomic(mcz_stats_atomic_t *) default_stats; /* ptr to "default" stats */
+    _Atomic(mcdc_ns_table_t *) cur;   // atomic pointer to immutable table
+    mcdc_stats_atomic_t global;       // global stats (always present)
+    _Atomic(mcdc_stats_atomic_t *) default_stats; /* ptr to "default" stats */
     _Atomic uint8_t               only_default;  /* 1 if only "default" exists */
-} mcz_stats_registry_t;
+} mcdc_stats_registry_t;
 
-mcz_stats_atomic_t *mcz_stats_global(void);
+mcdc_stats_atomic_t *mcdc_stats_global(void);
 
-mcz_stats_atomic_t *mcz_stats_default(void);
+mcdc_stats_atomic_t *mcdc_stats_default(void);
 
 // helper functions
-void mcz_stats_add_io(mcz_stats_atomic_t* s, uint64_t raw, uint64_t cmp);
-void mcz_stats_inc_err(mcz_stats_atomic_t* s, const char* kind);
+void mcdc_stats_add_io(mcdc_stats_atomic_t* s, uint64_t raw, uint64_t cmp);
+void mcdc_stats_inc_err(mcdc_stats_atomic_t* s, const char* kind);
 
 // snapshot fill
-void mcz_stats_snapshot_fill(mcz_stats_atomic_t* s,
-                             mcz_stats_snapshot_t* out);
+void mcdc_stats_snapshot_fill(mcdc_stats_atomic_t* s,
+                             mcdc_stats_snapshot_t* out);
 
-int mcz_stats_registry_global_init(size_t nbuckets);
+int mcdc_stats_registry_global_init(size_t nbuckets);
 
-mcz_stats_registry_t *mcz_stats_registry_global(void);
+mcdc_stats_registry_t *mcdc_stats_registry_global(void);
 
-void mcz_stats_registry_global_destroy(void);
+void mcdc_stats_registry_global_destroy(void);
 
-int mcz_stats_rebuild_from_list(const char **names, size_t N, size_t nbuckets_new);
-mcz_stats_atomic_t *
-mcz_stats_lookup_by_key(const char *key, size_t klen);
+int mcdc_stats_rebuild_from_list(const char **names, size_t N, size_t nbuckets_new);
+mcdc_stats_atomic_t *
+mcdc_stats_lookup_by_key(const char *key, size_t klen);
 
-mcz_stats_atomic_t *
-mcz_stats_lookup_by_ns(const char *nsp, size_t nsp_sz);
+mcdc_stats_atomic_t *
+mcdc_stats_lookup_by_ns(const char *nsp, size_t nsp_sz);
 
-void mcz_stats_snapshot_dump(const mcz_stats_snapshot_t *s, const char *ns);
-void mcz_stats_snapshot_dump_json(const mcz_stats_snapshot_t *s, const char *ns);
+void mcdc_stats_snapshot_dump(const mcdc_stats_snapshot_t *s, const char *ns);
+void mcdc_stats_snapshot_dump_json(const mcdc_stats_snapshot_t *s, const char *ns);
 
-int mcz_stats_is_default(mcz_stats_atomic_t * stats, bool *res);
+int mcdc_stats_is_default(mcdc_stats_atomic_t * stats, bool *res);
 
 #ifdef __cplusplus
 }

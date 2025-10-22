@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 /*
- * mcz_sampling.h
+ * mcdc_sampling.h
  *
  * Standalone background sampler for key/value data.
- * - Producers call mcz_sampler_maybe_record() to submit samples (Bernoulli p).
+ * - Producers call mcdc_sampler_maybe_record() to submit samples (Bernoulli p).
  * - An internal MPSC queue buffers records.
  * - A single background thread drains to a spool file until a size cap or timed window expired.
  * - When the file hits the cap, sampling is auto-disabled.
@@ -48,32 +48,32 @@ typedef struct {
     size_t  bytes_written;        /* current file size (bytes) */
     size_t  bytes_collected;      /* current bytes collected (bytes) */
     char    current_path[1024];   /* current file path ("" if none) */
-} mcz_sampler_status_t;
+} mcdc_sampler_status_t;
 
 /* Initialize module with parameters from higher-level config.
  * Takes ownership of nothing; copies strings internally.
  * Returns 0 on success, <0 (negative errno) on error.
  */
-int mcz_sampler_init(const char *spool_dir,
+int mcdc_sampler_init(const char *spool_dir,
                      double sample_p,
                      int sample_window_sec,
                      size_t spool_max_bytes);
 
 /* Start/stop background thread explicitly. */
-int  mcz_sampler_start(void);
-int mcz_sampler_stop(void);
+int  mcdc_sampler_start(void);
+int mcdc_sampler_stop(void);
 
 /* Producer API: Apply Bernoulli(p), deep-copy key/value, and enqueue.
  * Returns 1 if accepted+queued, 0 if skipped/disabled, <0 on error.
  */
-int mcz_sampler_maybe_record(const void *key, size_t klen,
+int mcdc_sampler_maybe_record(const void *key, size_t klen,
                              const void *val, size_t vlen);
 
 /* Get a status snapshot. 'out' must be non-NULL. */
-void mcz_sampler_get_status(mcz_sampler_status_t *out);
+void mcdc_sampler_get_status(mcdc_sampler_status_t *out);
 
 /* For tests/shutdown: drain and free queued items without writing to disk. */
-void mcz_sampler_drain_queue(void);
+void mcdc_sampler_drain_queue(void);
 
 #ifdef __cplusplus
 }

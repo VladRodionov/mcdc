@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 /*
- * mcz_utils.c
+ * mcdc_utils.c
  *
- * Common utility helpers shared across the memcached-Zstd (MCZ) modules.
+ * Common utility helpers shared across the memcached-Zstd (MC/DC) modules.
  *
  * Responsibilities:
  *   - Error handling helpers (set_err).
@@ -26,9 +26,9 @@
  *   - String manipulation (namespace joiners, etc.).
  *
  * Design:
- *   - Standalone, no dependencies on higher-level MCZ modules.
+ *   - Standalone, no dependencies on higher-level MC/DC modules.
  *   - Intended for small, reusable building blocks.
- *   - All helpers prefixed with `mcz_` for consistency.
+ *   - All helpers prefixed with `mcdc_` for consistency.
  */
 // Feature-test macros (must be before any #include)
 #ifndef _GNU_SOURCE
@@ -37,7 +37,7 @@
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L  // for setenv(), unsetenv(), realpath(), etc.
 #endif
-#include "mcz_utils.h"
+#include "mcdc_utils.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -238,7 +238,7 @@ int atomic_write_text(const char *dir, const char *final_path,
                              text, strlen(text), 0644, err_out);
 }
 
-char *mcz_join_namespaces(const char * const *prefixes, size_t nprefixes,
+char *mcdc_join_namespaces(const char * const *prefixes, size_t nprefixes,
                           const char *sep)
 {
     if (!sep) sep = ", ";

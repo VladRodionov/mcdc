@@ -9,7 +9,7 @@
 #include "storage.h"
 #include <string.h>
 #include <stdlib.h>
-#include "mcz_cmd.h"
+#include "mcdc_cmd.h"
 
 /** binprot handlers **/
 static void process_bin_flush(conn *c, char *extbuf);
@@ -489,7 +489,7 @@ static void process_bin_get_or_touch(conn *c, char *extbuf) {
         /* the length has two unnecessary bytes ("\r\n") */
         uint16_t keylen = 0;
 #ifdef USE_ZSTD
-        int nbytes = ITEM_is_zstd(it)? mcz_orig_size(ITEM_data(it), it->nbytes):it->nbytes;
+        int nbytes = ITEM_is_zstd(it)? mcdc_orig_size(ITEM_data(it), it->nbytes):it->nbytes;
 #else
         int nbytes = it->nbytes;
 #endif

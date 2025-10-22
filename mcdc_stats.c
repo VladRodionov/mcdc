@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 /*
- * mcz_stats.c
+ * mcdc_stats.c
  *
  * Implementation of statistics subsystem for Memcarrot (mcz).
  *
@@ -33,7 +33,7 @@
  *     during snapshot or admin command output.
  *
  * Naming convention:
- *   - All functions and types prefixed with `mcz_stats_*`.
+ *   - All functions and types prefixed with `mcdc_stats_*`.
  */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1   // for O_CLOEXEC on glibc + some GNU bits
@@ -42,8 +42,8 @@
 #define _POSIX_C_SOURCE 200809L  // for setenv(), unsetenv(), realpath(), etc.
 #endif
 
-#include "mcz_stats.h"
-#include "mcz_utils.h"
+#include "mcdc_stats.h"
+#include "mcdc_utils.h"
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -51,7 +51,7 @@
 #include <inttypes.h>
 
 
-static mcz_stats_registry_t *g_reg = NULL;
+static mcdc_stats_registry_t *g_reg = NULL;
 
 static inline uint64_t ld64(_Atomic uint64_t* a){
     return atomic_load_explicit(a, memory_order_relaxed);
@@ -65,24 +65,24 @@ static inline int64_t  ld64s(_Atomic int64_t*  a){
     return atomic_load_explicit(a, memory_order_relaxed);
 }
 
-static mcz_ns_table_t *table_new(size_t nbuckets) {
+static mcdc_ns_table_t *table_new(size_t nbuckets) {
     if (nbuckets == 0) nbuckets = 256;
-    mcz_ns_table_t *t = (mcz_ns_table_t *)xzmalloc(sizeof(*t));
+    mcdc_ns_table_t *t = (mcdc_ns_table_t *)xzmalloc(sizeof(*t));
     if (!t) return NULL;
     atomic_store_explicit(&t->refcnt, 0, memory_order_relaxed);
     t->nbuckets = nbuckets;
-    t->buckets = (mcz_stats_ns_entry_t **)xzmalloc(nbuckets * sizeof(*t->buckets));
+    t->buckets = (mcdc_stats_ns_entry_t **)xzmalloc(nbuckets * sizeof(*t->buckets));
     if (!t->buckets) { free(t); return NULL; }
     return t;
 }
 
 /* Free table and all entry names; DO NOT free stats blocks here unless told to */
-static void table_free(mcz_ns_table_t *t, int free_stats) {
+static void table_free(mcdc_ns_table_t *t, int free_stats) {
     if (!t) return;
     for (size_t i = 0; i < t->nbuckets; ++i) {
-        mcz_stats_ns_entry_t *e = t->buckets[i];
+        mcdc_stats_ns_entry_t *e = t->buckets[i];
         while (e) {
-            mcz_stats_ns_entry_t *n = e->next;
+            mcdc_stats_ns_entry_t *n = e->next;
             free((void*)e->name);
             if (free_stats && e->stats) free(e->stats);
             free(e);
@@ -93,7 +93,7 @@ static void table_free(mcz_ns_table_t *t, int free_stats) {
     free(t);
 }
 
-static void mcz_stats_init(mcz_stats_atomic_t* s){
+static void mcdc_stats_init(mcdc_stats_atomic_t* s){
     memset(s, 0, sizeof(*s));
 }
 
@@ -104,25 +104,25 @@ static inline size_t bucket_idx(size_t nbuckets, const char *ns) {
  * Initialize stats registry and ensure "default" namespace exists.
  */
 static int
-mcz_stats_registry_init(mcz_stats_registry_t *r, size_t nbuckets)
+mcdc_stats_registry_init(mcdc_stats_registry_t *r, size_t nbuckets)
 {
     if (!r) return -EINVAL;
 
-    mcz_stats_init(&r->global);
+    mcdc_stats_init(&r->global);
 
     /* build empty table */
-    mcz_ns_table_t *t = table_new(nbuckets);
+    mcdc_ns_table_t *t = table_new(nbuckets);
     if (!t) return -ENOMEM;
 
     /* create "default" namespace entry */
 
     const char *defname = "default";
-    mcz_stats_atomic_t *stats = (mcz_stats_atomic_t *)calloc(1, sizeof(*stats));
+    mcdc_stats_atomic_t *stats = (mcdc_stats_atomic_t *)calloc(1, sizeof(*stats));
     if (!stats) { table_free(t, /*free_stats=*/1); return -ENOMEM; }
-    mcz_stats_init(stats);
+    mcdc_stats_init(stats);
 
     size_t b = bucket_idx(t->nbuckets, defname);
-    mcz_stats_ns_entry_t *e = (mcz_stats_ns_entry_t *)calloc(1, sizeof(*e));
+    mcdc_stats_ns_entry_t *e = (mcdc_stats_ns_entry_t *)calloc(1, sizeof(*e));
     if (!e) { table_free(t, /*free_stats=*/1); return -ENOMEM; }
 
     e->name = strdup(defname);
@@ -141,9 +141,9 @@ mcz_stats_registry_init(mcz_stats_registry_t *r, size_t nbuckets)
     return 0;
 }
 
-static void mcz_stats_registry_destroy(mcz_stats_registry_t *r) {
+static void mcdc_stats_registry_destroy(mcdc_stats_registry_t *r) {
     if (!r) return;
-    mcz_ns_table_t *t = atomic_load_explicit(&r->cur, memory_order_acquire);
+    mcdc_ns_table_t *t = atomic_load_explicit(&r->cur, memory_order_acquire);
     // Wait for outstanding readers on final table (should be zero unless bug)
     while (atomic_load_explicit(&t->refcnt, memory_order_acquire) != 0) { /* spin briefly */ }
     table_free(t, /*free_stats=*/1);
@@ -152,12 +152,12 @@ static void mcz_stats_registry_destroy(mcz_stats_registry_t *r) {
 
 /* Sum per-namespace counters into the global block.
    Returns 0 on success, -ENOENT if the registry/table is unavailable. */
-static int mcz_stats_sync_global(void)
+static int mcdc_stats_sync_global(void)
 {
-    mcz_stats_registry_t *r = mcz_stats_registry_global();
+    mcdc_stats_registry_t *r = mcdc_stats_registry_global();
     if (!r) return -ENOENT;
 
-    mcz_ns_table_t *t = atomic_load_explicit(&r->cur, memory_order_acquire);
+    mcdc_ns_table_t *t = atomic_load_explicit(&r->cur, memory_order_acquire);
     if (!t) return -ENOENT;
 
     /* Hold a stable snapshot of the table while iterating */
@@ -176,8 +176,8 @@ static int mcz_stats_sync_global(void)
     uint64_t skipped_comp_incomp   = 0;
 
     for (size_t i = 0; i < t->nbuckets; ++i) {
-        for (mcz_stats_ns_entry_t *e = t->buckets[i]; e; e = e->next) {
-            mcz_stats_atomic_t *st = e->stats;
+        for (mcdc_stats_ns_entry_t *e = t->buckets[i]; e; e = e->next) {
+            mcdc_stats_atomic_t *st = e->stats;
             if (!st) continue;
 
             bytes_raw_total += atomic_load_explicit(&st->bytes_raw_total,  memory_order_relaxed);
@@ -194,7 +194,7 @@ static int mcz_stats_sync_global(void)
         }
     }
     /* add default */
-    mcz_stats_atomic_t *st = atomic_load_explicit(&r->default_stats, memory_order_acquire);
+    mcdc_stats_atomic_t *st = atomic_load_explicit(&r->default_stats, memory_order_acquire);
     bytes_raw_total += atomic_load_explicit(&st->bytes_raw_total,  memory_order_relaxed);
     bytes_cmp_total += atomic_load_explicit(&st->bytes_cmp_total,  memory_order_relaxed);
     writes_total    += atomic_load_explicit(&st->writes_total,  memory_order_relaxed);
@@ -229,42 +229,42 @@ static int mcz_stats_sync_global(void)
 
 /* Public API */
 
-mcz_stats_atomic_t *mcz_stats_global(void) {
-    mcz_stats_sync_global();
-    mcz_stats_registry_t *r = g_reg;
+mcdc_stats_atomic_t *mcdc_stats_global(void) {
+    mcdc_stats_sync_global();
+    mcdc_stats_registry_t *r = g_reg;
     return r ? &r->global : NULL;
 }
 
-int mcz_stats_registry_global_init(size_t nbuckets)
+int mcdc_stats_registry_global_init(size_t nbuckets)
 {
     if (g_reg) return 0;  // already initialized (single thread)
-    mcz_stats_registry_t *r = calloc(1, sizeof(*r));
+    mcdc_stats_registry_t *r = calloc(1, sizeof(*r));
     if (!r) return -1;
-    int rc = mcz_stats_registry_init(r, nbuckets);
+    int rc = mcdc_stats_registry_init(r, nbuckets);
     if (rc != 0) { free(r); return rc; }
     g_reg = r; // publish before any worker threads start
     return 0;
 }
 
-mcz_stats_registry_t *mcz_stats_registry_global(void)
+mcdc_stats_registry_t *mcdc_stats_registry_global(void)
 {
     return g_reg; // safe after init, no atomic needed
 }
 
-void mcz_stats_registry_global_destroy(void)
+void mcdc_stats_registry_global_destroy(void)
 {
     if (!g_reg) return;
-    mcz_stats_registry_destroy(g_reg);
+    mcdc_stats_registry_destroy(g_reg);
     free(g_reg);
     g_reg = NULL;
 }
 
-void mcz_stats_add_io(mcz_stats_atomic_t* s, uint64_t raw, uint64_t cmp) {
+void mcdc_stats_add_io(mcdc_stats_atomic_t* s, uint64_t raw, uint64_t cmp) {
     atomic_fetch_add_explicit(&s->bytes_raw_total, raw, memory_order_relaxed);
     atomic_fetch_add_explicit(&s->bytes_cmp_total, cmp, memory_order_relaxed);
 }
 
-void mcz_stats_inc_err(mcz_stats_atomic_t* s, const char* kind){
+void mcdc_stats_inc_err(mcdc_stats_atomic_t* s, const char* kind){
     if (!kind) return;
     if (kind[0]=='c') atomic_fetch_add(&s->compress_errs, 1);
     else if (kind[0]=='d') atomic_fetch_add(&s->decompress_errs, 1);
@@ -272,8 +272,8 @@ void mcz_stats_inc_err(mcz_stats_atomic_t* s, const char* kind){
 }
 
 
-void mcz_stats_snapshot_fill(mcz_stats_atomic_t* s,
-                             mcz_stats_snapshot_t* o)
+void mcdc_stats_snapshot_fill(mcdc_stats_atomic_t* s,
+                             mcdc_stats_snapshot_t* o)
 {
 
     o->bytes_raw_total = ld64(&s->bytes_raw_total);
@@ -315,25 +315,25 @@ void mcz_stats_snapshot_fill(mcz_stats_atomic_t* s,
  * If no namespace matches, returns the "default" namespace stats.
  * Returns NULL only if the registry/table is uninitialized and no default exists.
  */
-mcz_stats_atomic_t *
-mcz_stats_lookup_by_key(const char *key, size_t klen)
+mcdc_stats_atomic_t *
+mcdc_stats_lookup_by_key(const char *key, size_t klen)
 {
-    const mcz_stats_registry_t *r = g_reg;
+    const mcdc_stats_registry_t *r = g_reg;
     if (!r || !key) return NULL;
     bool only_default = (uint8_t)atomic_load_explicit(&r->only_default, memory_order_acquire) != 0;
-    mcz_stats_atomic_t *def = (mcz_stats_atomic_t *) atomic_load_explicit(&r->default_stats, memory_order_acquire);
+    mcdc_stats_atomic_t *def = (mcdc_stats_atomic_t *) atomic_load_explicit(&r->default_stats, memory_order_acquire);
     if (only_default){
         return def;
     }
-    mcz_ns_table_t *t = atomic_load_explicit(&r->cur, memory_order_acquire);
+    mcdc_ns_table_t *t = atomic_load_explicit(&r->cur, memory_order_acquire);
     if (!t) return NULL;
 
     atomic_fetch_add_explicit(&t->refcnt, 1, memory_order_acq_rel);
 
-    mcz_stats_atomic_t *found = NULL;
+    mcdc_stats_atomic_t *found = NULL;
 
     for (size_t i = 0; i < t->nbuckets; ++i) {
-        mcz_stats_ns_entry_t *e = t->buckets[i];
+        mcdc_stats_ns_entry_t *e = t->buckets[i];
         for (; e; e = e->next) {
             const char *ns = e->name;
             if (!ns) continue;
@@ -355,14 +355,14 @@ mcz_stats_lookup_by_key(const char *key, size_t klen)
     }
  }
 
-mcz_stats_atomic_t *mcz_stats_default(void) {
-    return (mcz_stats_atomic_t *) atomic_load_explicit(&g_reg->default_stats, memory_order_acquire);
+mcdc_stats_atomic_t *mcdc_stats_default(void) {
+    return (mcdc_stats_atomic_t *) atomic_load_explicit(&g_reg->default_stats, memory_order_acquire);
 }
 
-mcz_stats_atomic_t *
-mcz_stats_lookup_by_ns(const char *nsp, size_t nsp_sz)
+mcdc_stats_atomic_t *
+mcdc_stats_lookup_by_ns(const char *nsp, size_t nsp_sz)
 {
-    mcz_stats_registry_t *r = g_reg;
+    mcdc_stats_registry_t *r = g_reg;
     if (!r) return NULL;
     if (!nsp){
         // Global stats
@@ -372,18 +372,18 @@ mcz_stats_lookup_by_ns(const char *nsp, size_t nsp_sz)
         // Check if it is default
         char *def_name = "default";
         if (nsp_sz == strlen(def_name) && strcmp(nsp, def_name) == 0){
-            return mcz_stats_default();
+            return mcdc_stats_default();
         }
     }
-    mcz_ns_table_t *t = atomic_load_explicit(&r->cur, memory_order_acquire);
+    mcdc_ns_table_t *t = atomic_load_explicit(&r->cur, memory_order_acquire);
     if (!t) return NULL;
 
     atomic_fetch_add_explicit(&t->refcnt, 1, memory_order_acq_rel);
 
-    mcz_stats_atomic_t *found = NULL;
+    mcdc_stats_atomic_t *found = NULL;
 
     for (size_t i = 0; i < t->nbuckets; ++i) {
-        mcz_stats_ns_entry_t *e = t->buckets[i];
+        mcdc_stats_ns_entry_t *e = t->buckets[i];
         for (; e; e = e->next) {
             const char *ns = e->name;
             if (!ns) continue;
@@ -403,11 +403,11 @@ mcz_stats_lookup_by_ns(const char *nsp, size_t nsp_sz)
 
 
 /* Local helper : find stats in the old table by namespace name. */
-static mcz_stats_atomic_t *
-find_stats(const mcz_ns_table_t *old, const char *name)
+static mcdc_stats_atomic_t *
+find_stats(const mcdc_ns_table_t *old, const char *name)
 {
     size_t b = bucket_idx(old->nbuckets, name);
-    const mcz_stats_ns_entry_t *e = old->buckets[b];
+    const mcdc_stats_ns_entry_t *e = old->buckets[b];
     while (e) {
         if (strcmp(e->name, name) == 0) return e->stats;
         e = e->next;
@@ -415,10 +415,10 @@ find_stats(const mcz_ns_table_t *old, const char *name)
     return NULL;
 }
 
-int mcz_stats_is_default(mcz_stats_atomic_t * stats, bool *res){
-    mcz_stats_registry_t *r = g_reg;
+int mcdc_stats_is_default(mcdc_stats_atomic_t * stats, bool *res){
+    mcdc_stats_registry_t *r = g_reg;
     if (!r) return -EINVAL;
-    mcz_stats_atomic_t * def = (mcz_stats_atomic_t *) atomic_load_explicit(&r->default_stats, memory_order_acquire);
+    mcdc_stats_atomic_t * def = (mcdc_stats_atomic_t *) atomic_load_explicit(&r->default_stats, memory_order_acquire);
     if(!def) return -EINVAL;
     if(res) *res = stats == def;
     return 0;
@@ -429,25 +429,25 @@ int mcz_stats_is_default(mcz_stats_atomic_t * stats, bool *res){
    N       : count
    nbuckets_new : hashing fanout for the new table, can be 0
    Returns 0 on success, <0 on error. */
-int mcz_stats_rebuild_from_list(const char **names, size_t N, size_t nbuckets_new)
+int mcdc_stats_rebuild_from_list(const char **names, size_t N, size_t nbuckets_new)
 {
-    mcz_stats_registry_t *r = g_reg;
+    mcdc_stats_registry_t *r = g_reg;
     if (!r) return -EINVAL;
 
     /* Snapshot current table */
-    mcz_ns_table_t *old = atomic_load_explicit(&r->cur, memory_order_acquire);
+    mcdc_ns_table_t *old = atomic_load_explicit(&r->cur, memory_order_acquire);
     if (!old) return -EINVAL;
 
     /* Build a new immutable table */
-    mcz_ns_table_t *neu = table_new(nbuckets_new ? nbuckets_new : old->nbuckets);
+    mcdc_ns_table_t *neu = table_new(nbuckets_new ? nbuckets_new : old->nbuckets);
     if (!neu) return -ENOMEM;
 
     /* Populate new table entries, reusing old stats when possible */
 
     for (size_t i = 0; i < N; ++i) {
         const char *name = names[i];
-        mcz_stats_ns_entry_t *e;
-        mcz_stats_atomic_t *stats;
+        mcdc_stats_ns_entry_t *e;
+        mcdc_stats_atomic_t *stats;
         size_t b;
 
         if (!name || !*name) continue;
@@ -455,14 +455,14 @@ int mcz_stats_rebuild_from_list(const char **names, size_t N, size_t nbuckets_ne
         stats = find_stats(old, name);
         if (!stats) {
             /* New namespace: allocate fresh stats block */
-            stats = (mcz_stats_atomic_t *)calloc(1, sizeof(*stats));
+            stats = (mcdc_stats_atomic_t *)calloc(1, sizeof(*stats));
             if (!stats) { table_free(neu, /*free_stats=*/1); return -ENOMEM; }
-            mcz_stats_init(stats);
+            mcdc_stats_init(stats);
         }
 
         /* Insert entry into new table */
         b = bucket_idx(neu->nbuckets, name);
-        e = (mcz_stats_ns_entry_t *)calloc(1, sizeof(*e));
+        e = (mcdc_stats_ns_entry_t *)calloc(1, sizeof(*e));
         if (!e) { table_free(neu, /*free_stats=*/1); return -ENOMEM; }
 
         e->name = strdup(name);
@@ -493,14 +493,14 @@ int mcz_stats_rebuild_from_list(const char **names, size_t N, size_t nbuckets_ne
     return 0;
 }
 
-void mcz_stats_snapshot_dump(const mcz_stats_snapshot_t *s, const char *ns)
+void mcdc_stats_snapshot_dump(const mcdc_stats_snapshot_t *s, const char *ns)
 {
     if (!s) {
         printf("(null snapshot)\n");
         return;
     }
 
-    printf("=== MCZ Stats Snapshot [%s] ===\n", ns ? ns : "global");
+    printf("=== MC/DC Stats Snapshot [%s] ===\n", ns ? ns : "global");
 
     printf("ewma_m           : %.6f\n", s->ewma_m);
     printf("baseline         : %.6f\n", s->baseline);
@@ -548,7 +548,7 @@ void mcz_stats_snapshot_dump(const mcz_stats_snapshot_t *s, const char *ns)
     printf("===============================\n");
 }
 
-void mcz_stats_snapshot_dump_json(const mcz_stats_snapshot_t *s, const char *ns)
+void mcdc_stats_snapshot_dump_json(const mcdc_stats_snapshot_t *s, const char *ns)
 {
     if (!s) {
         printf("null\n");

@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 /*
- * mcz_config.c
+ * mcdc_config.c
  *
- * Configuration parsing and runtime options for memcached-Zstd (MCZ).
+ * Configuration parsing and runtime options for memcached-Zstd (MC/DC).
  *
  * Responsibilities:
  *   - Define configuration structures (compression level, dictionary paths, limits).
@@ -26,7 +26,7 @@
  * Design:
  *   - Centralized configuration, immutable after initialization.
  *   - Plain C structures, minimal dependencies.
- *   - All symbols prefixed with `mcz_` for consistency.
+ *   - All symbols prefixed with `mcdc_` for consistency.
  */
 #if defined(__APPLE__)
   #ifndef _DARWIN_C_SOURCE
@@ -45,15 +45,15 @@
 #include <string.h>
 #include <strings.h>
 
-#include "memcached.h"                  /* settings, mcz_cfg_t          */
-#include "mcz_config.h"
+#include "memcached.h"                  /* settings, mcdc_cfg_t          */
+#include "mcdc_config.h"
 
 
-static mcz_cfg_t g_cfg = {0};
+static mcdc_cfg_t g_cfg = {0};
 
 static bool inited = false;
 
-mcz_cfg_t * mcz_config_get(void) {
+mcdc_cfg_t * mcdc_config_get(void) {
     return &g_cfg;
 }
 
@@ -140,10 +140,10 @@ static int parse_frac(const char *val, double *out) {
     *out = d;
     return 0;
 }
-static int parse_train_mode(const char *val, mcz_train_mode_t *out) {
-    if (!val || !*val) { *out = MCZ_TRAIN_FAST; return 0; }
-    if (!strcasecmp(val, "fast"))     { *out = MCZ_TRAIN_FAST;     return 0; }
-    if (!strcasecmp(val, "optimize")) { *out = MCZ_TRAIN_OPTIMIZE; return 0; }
+static int parse_train_mode(const char *val, mcdc_train_mode_t *out) {
+    if (!val || !*val) { *out = MCDC_TRAIN_FAST; return 0; }
+    if (!strcasecmp(val, "fast"))     { *out = MCDC_TRAIN_FAST;     return 0; }
+    if (!strcasecmp(val, "optimize")) { *out = MCDC_TRAIN_OPTIMIZE; return 0; }
 
     return -EINVAL;
 }
@@ -159,43 +159,43 @@ static void rtrim(char *s)
         *p = '\0';
 }
 
-void mcz_init_default_config(void) {
+void mcdc_init_default_config(void) {
     if(inited) return;
-    g_cfg.enable_comp           = MCZ_DEFAULT_ENABLE_COMP;
-    g_cfg.enable_dict           = MCZ_DEFAULT_ENABLE_DICT;
-    g_cfg.dict_dir              = MCZ_DEFAULT_DICT_DIR;
-    g_cfg.dict_size             = MCZ_DEFAULT_DICT_SIZE;
-    g_cfg.zstd_level            = MCZ_DEFAULT_ZSTD_LEVEL;
-    g_cfg.min_comp_size         = MCZ_DEFAULT_MIN_COMP_SIZE;
-    g_cfg.max_comp_size         = MCZ_DEFAULT_MAX_COMP_SIZE;
+    g_cfg.enable_comp           = MCDC_DEFAULT_ENABLE_COMP;
+    g_cfg.enable_dict           = MCDC_DEFAULT_ENABLE_DICT;
+    g_cfg.dict_dir              = MCDC_DEFAULT_DICT_DIR;
+    g_cfg.dict_size             = MCDC_DEFAULT_DICT_SIZE;
+    g_cfg.zstd_level            = MCDC_DEFAULT_ZSTD_LEVEL;
+    g_cfg.min_comp_size         = MCDC_DEFAULT_MIN_COMP_SIZE;
+    g_cfg.max_comp_size         = MCDC_DEFAULT_MAX_COMP_SIZE;
 
-    g_cfg.enable_training       = MCZ_DEFAULT_ENABLE_TRAINING;
-    g_cfg.retraining_interval_s = MCZ_DEFAULT_RETRAIN_INTERVAL_S;
-    g_cfg.min_training_size     = MCZ_DEFAULT_MIN_TRAINING_SIZE;
-    g_cfg.ewma_alpha            = MCZ_DEFAULT_EWMA_ALPHA;
-    g_cfg.retrain_drop          = MCZ_DEFAULT_RETRAIN_DROP;
-    g_cfg.train_mode            = MCZ_DEFAULT_TRAIN_MODE;
+    g_cfg.enable_training       = MCDC_DEFAULT_ENABLE_TRAINING;
+    g_cfg.retraining_interval_s = MCDC_DEFAULT_RETRAIN_INTERVAL_S;
+    g_cfg.min_training_size     = MCDC_DEFAULT_MIN_TRAINING_SIZE;
+    g_cfg.ewma_alpha            = MCDC_DEFAULT_EWMA_ALPHA;
+    g_cfg.retrain_drop          = MCDC_DEFAULT_RETRAIN_DROP;
+    g_cfg.train_mode            = MCDC_DEFAULT_TRAIN_MODE;
 
-    g_cfg.gc_cool_period        = MCZ_DEFAULT_GC_COOL_PERIOD;
-    g_cfg.gc_quarantine_period  = MCZ_DEFAULT_GC_QUARANTINE_PERIOD;
+    g_cfg.gc_cool_period        = MCDC_DEFAULT_GC_COOL_PERIOD;
+    g_cfg.gc_quarantine_period  = MCDC_DEFAULT_GC_QUARANTINE_PERIOD;
 
-    g_cfg.dict_retain_max       = MCZ_DEFAULT_DICT_RETAIN_MAX;
+    g_cfg.dict_retain_max       = MCDC_DEFAULT_DICT_RETAIN_MAX;
 
-    g_cfg.enable_sampling       = MCZ_DEFAULT_ENABLE_SAMPLING;
-    g_cfg.sample_p              = MCZ_DEFAULT_SAMPLE_P;
-    g_cfg.sample_window_duration     = MCZ_DEFAULT_SAMPLE_WINDOW_DURATION;
-    g_cfg.spool_dir             = MCZ_DEFAULT_SPOOL_DIR;
-    g_cfg.spool_max_bytes       = MCZ_DEFAULT_SPOOL_MAX_BYTES;
-    g_cfg.compress_keys         = MCZ_DEFAULT_COMPRESS_KEYS;
-    g_cfg.verbose               = MCZ_DEFAULT_VERBOSE;
+    g_cfg.enable_sampling       = MCDC_DEFAULT_ENABLE_SAMPLING;
+    g_cfg.sample_p              = MCDC_DEFAULT_SAMPLE_P;
+    g_cfg.sample_window_duration     = MCDC_DEFAULT_SAMPLE_WINDOW_DURATION;
+    g_cfg.spool_dir             = MCDC_DEFAULT_SPOOL_DIR;
+    g_cfg.spool_max_bytes       = MCDC_DEFAULT_SPOOL_MAX_BYTES;
+    g_cfg.compress_keys         = MCDC_DEFAULT_COMPRESS_KEYS;
+    g_cfg.verbose               = MCDC_DEFAULT_VERBOSE;
 
     inited = true;
 }
 
-static const char *train_mode_to_str(mcz_train_mode_t mode) {
+static const char *train_mode_to_str(mcdc_train_mode_t mode) {
     switch (mode) {
-        case MCZ_TRAIN_FAST:     return "FAST";
-        case MCZ_TRAIN_OPTIMIZE: return "OPTIMIZE";
+        case MCDC_TRAIN_FAST:     return "FAST";
+        case MCDC_TRAIN_OPTIMIZE: return "OPTIMIZE";
         default:                 return "UNKNOWN";
     }
 }
@@ -204,8 +204,8 @@ static inline bool strnull_or_empty(const char *s) {
     return (s == NULL) || (s[0] == '\0');
 }
 
-int mcz_config_sanity_check(void) {
-    mcz_cfg_t *cfg = &g_cfg;
+int mcdc_config_sanity_check(void) {
+    mcdc_cfg_t *cfg = &g_cfg;
     if (!cfg) return -1;
 
     if (!cfg->enable_comp) return 0;
@@ -235,9 +235,9 @@ int mcz_config_sanity_check(void) {
 
 
 /*-------------------------------------------------------------------------*/
-int parse_mcz_config(const char *path)
+int parse_mcdc_config(const char *path)
 {
-    mcz_init_default_config();
+    mcdc_init_default_config();
     FILE *fp = fopen(path, "r");
     if (!fp) {
         fprintf(stderr, "zstd: cannot open %s: %s\n", path, strerror(errno));
@@ -314,7 +314,7 @@ int parse_mcz_config(const char *path)
             double d; if (parse_frac(val, &d)) { fprintf(stderr, "%s:%d: bad retrain_drop '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.retrain_drop = d;
         } else if (!strcasecmp(key, "train_mode")) {
-            mcz_train_mode_t mode;
+            mcdc_train_mode_t mode;
             if(parse_train_mode(val, &mode)) { fprintf(stderr, "%s:%d: bad train_mode'%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue;}
             g_cfg.train_mode = mode;
         } else if (strcasecmp(key, "gc_cool_period") == 0) {
@@ -345,7 +345,7 @@ int parse_mcz_config(const char *path)
             int64_t v; if (parse_bytes(val, &v)) { fprintf(stderr, "%s:%d: bad spool_max_bytes '%s'\n", path, ln, val); rc = rc?rc:-EINVAL; continue; }
             g_cfg.spool_max_bytes = (size_t)v;
         } else if (strcasecmp(key, "compress_keys") == 0) {
-            /* legacy: ignored in MCZ; accept to avoid breaking configs */
+            /* legacy: ignored in MC/DC; accept to avoid breaking configs */
             fprintf(stderr, "%s:%d: NOTE: 'compress_keys' ignored\n", path, ln);
         } else {
             fprintf(stderr, "%s:%d: unknown key '%s'\n", path, ln, key);
@@ -376,13 +376,13 @@ err: // set compression to disabled
     return rc;
 }
 
-void mcz_config_print(const mcz_cfg_t *cfg) {
+void mcdc_config_print(const mcdc_cfg_t *cfg) {
     if (!cfg) {
         printf("(null config)\n");
         return;
     }
 
-    printf("=== MCZ Configuration ===\n");
+    printf("=== MC/DC Configuration ===\n");
 
     // Core
     printf("enable_comp        : %s\n", cfg->enable_comp ? "true" : "false");

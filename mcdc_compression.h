@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 /*
- * mcz_compression.h
+ * mcdc_compression.h
  *
- * Core compression/decompression API for memcached-Zstd (MCZ).
+ * Core compression/decompression API for memcached-Zstd (MC/DC).
  *
  * Responsibilities:
  *   - Define context structures and thread-local caches for Zstd.
@@ -24,13 +24,13 @@
  *   - Provide hooks for dictionary usage (CDict/DDict) and training integration.
  *
  * Design:
- *   - All compression state is kept in `mcz_ctx_t` and `tls_cache_t`.
+ *   - All compression state is kept in `mcdc_ctx_t` and `tls_cache_t`.
  *   - Thread-local cache avoids expensive Zstd context recreation.
  *   - Copy-on-write dictionary table publishing for safe hot updates.
- *   - All exported symbols prefixed with `mcz_` for clarity.
+ *   - All exported symbols prefixed with `mcdc_` for clarity.
  */
-#ifndef MCZ_COMPRESSION_H
-#define MCZ_COMPRESSION_H
+#ifndef MCDC_COMPRESSION_H
+#define MCDC_COMPRESSION_H
 
 #include <stdio.h>
 #include <stddef.h>
@@ -42,9 +42,9 @@
 #include <zstd.h>
 #include <stdatomic.h>
 #include <pthread.h>
-#include "mcz_config.h"
-#include "mcz_dict.h"
-#include "mcz_stats.h"
+#include "mcdc_config.h"
+#include "mcdc_dict.h"
+#include "mcdc_stats.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -59,27 +59,27 @@ typedef struct sample_node_s {
     void *buf;
 } sample_node_t;
 /* === GC state (MPSC retired table list) === */
-typedef struct mcz_retired_node_s {
-    struct mcz_retired_node_s *next;
-    struct mcz_table_s        *tab;        /* retired table */
+typedef struct mcdc_retired_node_s {
+    struct mcdc_retired_node_s *next;
+    struct mcdc_table_s        *tab;        /* retired table */
     time_t                     retired_at; /* enqueue time */
-} mcz_retired_node_t;
+} mcdc_retired_node_t;
 
 
 /* ---------- global context -------------------------------------------- */
-typedef struct mcz_ctx_s {
+typedef struct mcdc_ctx_s {
     _Atomic(sample_node_t *) samples_head;        /* MPSC list head (push-only) */
     _Atomic(size_t) bytes_pending;                /* atomically updated         */
     //TODO: not used
     pthread_t trainer_tid;
-    mcz_cfg_t *cfg;                                /* mcz configuration */
+    mcdc_cfg_t *cfg;                                /* mcz configuration */
     _Atomic(uintptr_t) dict_table;                /* Current dictionary routing table */
-    _Atomic(mcz_retired_node_t*) gc_retired_head; /* MPSC stack head */
+    _Atomic(mcdc_retired_node_t*) gc_retired_head; /* MPSC stack head */
     _Atomic(bool)               gc_stop;          /* signal to stop GC thread */
     pthread_t                   gc_tid;           /* GC thread id */
     _Atomic(bool)               train_active;     /* is training active */
 
-} mcz_ctx_t;
+} mcdc_ctx_t;
 
 /* ---- Thread-local cache ---- */
 typedef struct tls_cache_s {
@@ -89,7 +89,7 @@ typedef struct tls_cache_s {
     size_t     cap;
 } tls_cache_t;
 
-typedef struct mcz_reload_status_s {
+typedef struct mcdc_reload_status_s {
     int       rc;            /* 0 = success, <0 = error */
     uint32_t  namespaces;
     uint32_t  dicts_loaded;
@@ -98,52 +98,52 @@ typedef struct mcz_reload_status_s {
     uint32_t  dicts_retired;
     uint32_t  dicts_failed;
     char      err[128];
-} mcz_reload_status_t;
+} mcdc_reload_status_t;
 
 /* Global init / destroy */
-int mcz_init(void);
-void mcz_destroy(void);
+int mcdc_init(void);
+void mcdc_destroy(void);
 
 /* Fast-path API for Memcached */
 
-ssize_t mcz_decompress(const void *src,
+ssize_t mcdc_decompress(const void *src,
                        size_t src_size, void *dst, size_t dst_sz, uint16_t dict_id);
-ssize_t mcz_maybe_compress(const void *src, size_t src_sz, const void* key, size_t key_sz,
+ssize_t mcdc_maybe_compress(const void *src, size_t src_sz, const void* key, size_t key_sz,
                            void **dst, uint16_t *dict_id_out);
-ssize_t mcz_orig_size(const void *src, size_t comp_size);
+ssize_t mcdc_orig_size(const void *src, size_t comp_size);
 
 /* Return values
  *   >0  : decompressed length
  *    0  : either ITEM_ZSTD flag not set  *or*  item is chunked
  *   <0  : negative errno / ZSTD error code
  */
-ssize_t mcz_maybe_decompress(const char *value,
+ssize_t mcdc_maybe_decompress(const char *value,
                              size_t value_sz, const char *key, size_t key_sz, void **dst, uint16_t did);
-void mcz_report_dict_miss_err(const char *key, size_t klen);
+void mcdc_report_dict_miss_err(const char *key, size_t klen);
 
-void mcz_report_decomp_err(const char *key, size_t klen);
+void mcdc_report_decomp_err(const char *key, size_t klen);
 
-const mcz_ctx_t *mcz_ctx(void);
-mcz_ctx_t       *mcz_ctx_mut(void);
+const mcdc_ctx_t *mcdc_ctx(void);
+mcdc_ctx_t       *mcdc_ctx_mut(void);
 
-int mcz_set_max_value_limit(size_t limit);
+int mcdc_set_max_value_limit(size_t limit);
 
 /* Feed raw samples for future dictionary training and file spooling*/
-void mcz_sample(const void *key, size_t klen, const void *value, size_t vlen);
+void mcdc_sample(const void *key, size_t klen, const void *value, size_t vlen);
 
-mcz_reload_status_t *mcz_reload_dictionaries(void);
+mcdc_reload_status_t *mcdc_reload_dictionaries(void);
 
 const char *
-mcz_match_namespace(const char *key, size_t klen,
+mcdc_match_namespace(const char *key, size_t klen,
                     const char **spaces, size_t nspaces);
 
-int mcz_get_stats_snapshot(mcz_stats_snapshot_t *snap, const char *ns, size_t ns_sz);
+int mcdc_get_stats_snapshot(mcdc_stats_snapshot_t *snap, const char *ns, size_t ns_sz);
 
-const char ** mcz_list_namespaces(size_t *count);
+const char ** mcdc_list_namespaces(size_t *count);
 
-bool mcz_dict_exists(uint16_t id);
+bool mcdc_dict_exists(uint16_t id);
 
 #ifdef __cplusplus
 }
 #endif
-#endif /* MCZ_COMPRESSION_H */
+#endif /* MCDC_COMPRESSION_H */

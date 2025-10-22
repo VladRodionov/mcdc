@@ -1,7 +1,7 @@
 /* -*- Mode: C; tab-width: 4; c-basic-offset: 4; indent-tabs-mode: nil -*- */
 #include "memcached.h"
 #ifdef USE_ZSTD
-#include "mcz_compression.h"
+#include "mcdc_compression.h"
 #endif
 #include <zstd.h>
 #include "bipbuffer.h"
@@ -1034,12 +1034,12 @@ item *do_item_get(const char *key, const size_t nkey, const uint32_t hv, LIBEVEN
 #ifdef USE_ZSTD
             if ((it->it_flags & ITEM_ZSTD) != 0) {
                 uint16_t  did = ITEM_get_dictid(it);
-                if (did > 0 && !mcz_dict_exists(did)){
+                if (did > 0 && !mcdc_dict_exists(did)){
                     do_item_unlink(it, hv);
                     STORAGE_delete(t->storage, it);
                     do_item_remove(it);
                     it = NULL;
-                    mcz_report_dict_miss_err(ITEM_key(it), it->nkey);
+                    mcdc_report_dict_miss_err(ITEM_key(it), it->nkey);
                     if (settings.verbose > 2) {
                         fprintf(stderr, " -nuked by missing dictionary error");
                     }

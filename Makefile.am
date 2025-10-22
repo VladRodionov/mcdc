@@ -82,10 +82,10 @@ memcached_SOURCES += extstore.c extstore.h \
 endif
 
 if HAVE_ZSTD
-memcached_SOURCES +=  mcz_compression.c mcz_compression.h mcz_config.c mcz_config.h \
-                      mcz_incompressible.h mcz_incompressible.c mcz_dict.h mcz_dict.c mcz_utils.h mcz_utils.c \
-                      mcz_gc.h mcz_gc.c mcz_dict_pool.h mcz_dict_pool.c mcz_eff_atomic.h mcz_eff_atomic.c \
-                      mcz_stats.h mcz_stats.c mcz_cmd.h mcz_cmd.c mcz_sampling.h mcz_sampling.c
+memcached_SOURCES +=  mcdc_compression.c mcdc_compression.h mcdc_config.c mcdc_config.h \
+                      mcdc_incompressible.h mcdc_incompressible.c mcdc_dict.h mcdc_dict.c mcdc_utils.h mcdc_utils.c \
+                      mcdc_gc.h mcdc_gc.c mcdc_dict_pool.h mcdc_dict_pool.c mcdc_eff_atomic.h mcdc_eff_atomic.c \
+                      mcdc_stats.h mcdc_stats.c mcdc_cmd.h mcdc_cmd.c mcdc_sampling.h mcdc_sampling.c
 endif
 
 if ENABLE_TLS

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 /*
- * mcz_utils.h
+ * mcdc_utils.h
  *
  * Implementation of shared utility functions used by MCZ modules.
  *
@@ -25,8 +25,8 @@
  *   - Safe directory sync after file operations.
  *   - String utilities (e.g., join namespace array).
  */
-#ifndef MCZ_UTILS_H
-#define MCZ_UTILS_H
+#ifndef MCDC_UTILS_H
+#define MCDC_UTILS_H
 #include <stdint.h>
 #include <stdarg.h>
 #include <stddef.h>
@@ -38,7 +38,7 @@
 extern "C" {
 #endif
 /*
- * Common utility functions for MCZ project.
+ * Common utility functions for MC/DC project.
  *
  * Caller is responsible for freeing strings allocated by
  * set_err() with free().
@@ -58,7 +58,7 @@ int atomic_write_text(const char *dir, const char *final_path,
                       const char *text, char **err_out);
 int fsync_dirpath(const char *dirpath);
 
-char *mcz_join_namespaces(const char * const *prefixes, size_t nprefixes,
+char *mcdc_join_namespaces(const char * const *prefixes, size_t nprefixes,
                           const char *sep);
 
 uint64_t now_usec(void);
@@ -129,4 +129,4 @@ atomic_inc64s(_Atomic int64_t *p, int64_t delta);
 #ifdef __cplusplus
 }
 #endif
-#endif /* MCZ_UTILS_H */
+#endif /* MCDC_UTILS_H */

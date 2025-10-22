@@ -14,16 +14,16 @@
  * limitations under the License.
  */
 /*
- * mcz_sampling.c
+ * mcdc_sampling.c
  *
  * Single-consumer spooler with an internal MPSC stack and background thread.
- * The thread writes records to <spool_dir>/mcz_samples_YYYYMMDD_HHMMSS.bin
+ * The thread writes records to <spool_dir>/mcdc_samples_YYYYMMDD_HHMMSS.bin
  * until 'spool_max_bytes' is reached or sampling window expired, then flips 'g_running' flag to false and stops.
  */
 
 #define _GNU_SOURCE
-#include "mcz_sampling.h"
-#include "mcz_utils.h"
+#include "mcdc_sampling.h"
+#include "mcdc_utils.h"
 
 #include <stdatomic.h>
 #include <pthread.h>
@@ -110,7 +110,7 @@ static int make_path(char *dst, size_t cap, const char *dir, time_t t) {
     tmv = *localtime(&t);
 #endif
     if (!dir || !*dir) dir = ".";
-    int n = snprintf(dst, cap, "%s/mcz_samples_%04d%02d%02d_%02d%02d%02d.bin",
+    int n = snprintf(dst, cap, "%s/mcdc_samples_%04d%02d%02d_%02d%02d%02d.bin",
                      dir,
                      tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
                      tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
@@ -259,7 +259,7 @@ stop:
 
 /* ---------------------- Public API ---------------------- */
 
-int mcz_sampler_init(const char *spool_dir,
+int mcdc_sampler_init(const char *spool_dir,
                      double sample_p,
                      int sample_window_sec,
                      size_t spool_max_bytes) {
@@ -271,7 +271,7 @@ int mcz_sampler_init(const char *spool_dir,
     return 0;
 }
 
-int mcz_sampler_start(void)
+int mcdc_sampler_start(void)
 {
     if (!atomic_load_explicit(&g_configured, memory_order_acquire))
         return -EINVAL;
@@ -289,7 +289,7 @@ int mcz_sampler_start(void)
     return 0;
 }
 
-int mcz_sampler_stop(void)
+int mcdc_sampler_stop(void)
 {
     if (!atomic_load_explicit(&g_running, memory_order_acquire))
         return 1; /* not running */
@@ -298,7 +298,7 @@ int mcz_sampler_stop(void)
     return 0;
 }
 
-int mcz_sampler_maybe_record(const void *key, size_t klen,
+int mcdc_sampler_maybe_record(const void *key, size_t klen,
                              const void *val, size_t vlen)
 {
     if (!atomic_load_explicit(&g_configured, memory_order_acquire))
@@ -336,7 +336,7 @@ int mcz_sampler_maybe_record(const void *key, size_t klen,
 }
 
 /* Get a status snapshot. 'out' must be non-NULL. */
-void mcz_sampler_get_status(mcz_sampler_status_t *out)
+void mcdc_sampler_get_status(mcdc_sampler_status_t *out)
 {
     if (!out) return;
 
@@ -352,7 +352,7 @@ void mcz_sampler_get_status(mcz_sampler_status_t *out)
     out->current_path[i] = '\0';
 }
 /* For tests/shutdown: drain and free queued items without writing to disk. */
-void mcz_sampler_drain_queue(void)
+void mcdc_sampler_drain_queue(void)
 {
     full_sample_node_t *lst = mpsc_drain();
     if (!lst) return;

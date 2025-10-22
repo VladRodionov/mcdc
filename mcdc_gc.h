@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 /*
- * mcz_gc.h
+ * mcdc_gc.h
  *
  * Implementation of garbage collector (GC) for retired dictionary tables.
- * Enqueues old mcz_table_t instances and reclaims them after a cooling-off
+ * Enqueues old mcdc_table_t instances and reclaims them after a cooling-off
  * period. Runs as a background thread draining the retired stack.
  *
  * Key duties:
@@ -26,8 +26,8 @@
  *   - Table + dictionary metadata cleanup.
  *   - Optional unlink of obsolete files.
  */
-#ifndef MCZ_GC_H
-#define MCZ_GC_H
+#ifndef MCDC_GC_H
+#define MCDC_GC_H
 
 #include <stddef.h>
 #include <time.h>
@@ -36,24 +36,24 @@
 extern "C" {
 #endif
 
-struct mcz_ctx_s;    typedef struct mcz_ctx_s    mcz_ctx_t;
-struct mcz_table_s;  typedef struct mcz_table_s  mcz_table_t;
-struct mcz_retired_node_s; typedef struct mcz_retired_node_s mcz_retired_node_t;
+struct mcdc_ctx_s;    typedef struct mcdc_ctx_s    mcdc_ctx_t;
+struct mcdc_table_s;  typedef struct mcdc_table_s  mcdc_table_t;
+struct mcdc_retired_node_s; typedef struct mcdc_retired_node_s mcdc_retired_node_t;
 
 /* Start GC thread;  */
-int  mcz_gc_start(mcz_ctx_t *ctx);
+int  mcdc_gc_start(mcdc_ctx_t *ctx);
 
 /* Signal GC to stop and join the thread. Safe to call multiple times. */
-void mcz_gc_stop(mcz_ctx_t *ctx);
+void mcdc_gc_stop(mcdc_ctx_t *ctx);
 
 /* Enqueue a retired table (called by publisher). Non-blocking MPSC push. */
-void mcz_gc_enqueue_retired(mcz_ctx_t *ctx, mcz_table_t *old_tab);
+void mcdc_gc_enqueue_retired(mcdc_ctx_t *ctx, mcdc_table_t *old_tab);
 
 /* Free a routing table and all its allocations (no file I/O). */
-void mcz_free_table(mcz_table_t *tab);
+void mcdc_free_table(mcdc_table_t *tab);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* MCZ_GC_H */
+#endif /* MCDC_GC_H */

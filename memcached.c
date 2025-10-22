@@ -62,7 +62,7 @@
 #endif
 
 #ifdef USE_ZSTD
-#include "mcz_config.h"
+#include "mcdc_config.h"
 #endif
 
 /*
@@ -1013,10 +1013,10 @@ void resp_add_iov_data(mc_resp *resp, item *it, int len){
     void  *ptr = ITEM_data(it);  /* default pointer              */
 #ifdef USE_ZSTD
     bool bin_proto = it->nbytes == len + 2;
-    /* mcz_maybe_decompress() may set resp->write_and_free            */
+    /* mcdc_maybe_decompress() may set resp->write_and_free            */
     /* 1. Skip if not compressed or chunked ------------------------ */
     if ((it->it_flags & ITEM_ZSTD) && !(it->it_flags & ITEM_CHUNKED)) {
-        ssize_t ds = mcz_maybe_decompress(ITEM_data(it), it->nbytes, ITEM_key(it),
+        ssize_t ds = mcdc_maybe_decompress(ITEM_data(it), it->nbytes, ITEM_key(it),
                                           it->nkey, &resp->write_and_free, ITEM_get_dictid(it));
         if (ds > 0) {                        /* success: use plain data  */
             ptr = resp->write_and_free;
@@ -1462,7 +1462,7 @@ static void reset_cmd_handler(conn *c) {
 }
 
 #ifdef USE_ZSTD
-static inline bool is_mcz_not_supported_cmd(conn *c) {
+static inline bool is_mcdc_not_supported_cmd(conn *c) {
 
 #ifdef PROXY
     if (c->protocol == proxy_prot){
@@ -1482,7 +1482,7 @@ static inline bool is_mcz_not_supported_cmd(conn *c) {
 
 static inline bool maybe_apply_compression(conn *c){
     item *it = c->item;
-    return !is_mcz_not_supported_cmd(c) && (it->it_flags & ITEM_CHUNKED) == 0;
+    return !is_mcdc_not_supported_cmd(c) && (it->it_flags & ITEM_CHUNKED) == 0;
 }
 #endif // USE_ZSTD
 
@@ -1513,12 +1513,12 @@ static void complete_nread(conn *c) {
     uint16_t did = 0;                           /* dictionary id          */
 
     /* Try to compress -------------------------------------------------- */
-    ssize_t clen = mcz_maybe_compress(ITEM_data(oit), oit->nbytes, ITEM_key(oit), oit->nkey,
+    ssize_t clen = mcdc_maybe_compress(ITEM_data(oit), oit->nbytes, ITEM_key(oit), oit->nkey,
                                        &cbuf, &did);
 
     if (clen > 0) {             /* Success → store compressed copy */
         /* 0. Add to dictinary training set and to sampler (if necessary) */
-        mcz_sample(ITEM_key(oit), oit->nkey, ITEM_data(oit), oit->nbytes);
+        mcdc_sample(ITEM_key(oit), oit->nkey, ITEM_data(oit), oit->nbytes);
         /* 1. Allocate a new, smaller item in the correct slab class    */
         item *nit = do_item_alloc(ITEM_key(oit), oit->nkey,
                                   c->req_client_flags, oit->exptime, (int)clen);
@@ -5302,7 +5302,7 @@ int main (int argc, char **argv) {
             break;
 #ifdef USE_ZSTD
        case 'z' :
-            if (parse_mcz_config(optarg) != 0) {
+            if (parse_mcdc_config(optarg) != 0) {
                 fprintf(stderr, "failed to load zstd config file %s\n", optarg);
                 exit(EXIT_FAILURE);
             }
@@ -5727,8 +5727,8 @@ int main (int argc, char **argv) {
 #endif
 #ifdef USE_ZSTD
                 case MCDC_DISABLED: {
-                    mcz_init_default_config();
-                    mcz_cfg_t *cfg =  mcz_config_get();
+                    mcdc_init_default_config();
+                    mcdc_cfg_t *cfg =  mcdc_config_get();
                     cfg->enable_comp = false;
                     cfg->enable_dict = false;
                     break;
@@ -6103,10 +6103,10 @@ int main (int argc, char **argv) {
     }
 #endif
 #ifdef USE_ZSTD
-    mcz_cfg_t *cfg =  mcz_config_get();
+    mcdc_cfg_t *cfg =  mcdc_config_get();
     cfg->verbose = settings.verbose;
-    mcz_init();
-    mcz_set_max_value_limit(settings.slab_chunk_size_max);
+    mcdc_init();
+    mcdc_set_max_value_limit(settings.slab_chunk_size_max);
 #endif
     if (settings.drop_privileges) {
         setup_privilege_violations_handler();

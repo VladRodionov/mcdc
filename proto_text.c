@@ -7,7 +7,7 @@
 #include "proto_text.h"
 
 #ifdef USE_ZSTD
-#include "mcz_cmd.h"
+#include "mcdc_cmd.h"
 #endif
 
 // FIXME: only for process_proxy_stats()
@@ -595,7 +595,7 @@ static inline void process_get_command(conn *c, token_t *tokens, size_t ntokens,
                   MEMCACHED_COMMAND_GET(c->sfd, ITEM_key(it), it->nkey,
                                         it->nbytes, ITEM_get_cas(it));
 #ifdef USE_ZSTD
-                  int nbytes = ITEM_is_zstd(it)? mcz_orig_size(ITEM_data(it), it->nbytes):it->nbytes;
+                  int nbytes = ITEM_is_zstd(it)? mcdc_orig_size(ITEM_data(it), it->nbytes):it->nbytes;
 #else
                   int nbytes = it->nbytes;
 #endif
@@ -1169,7 +1169,7 @@ static void process_mget_command(conn *c, token_t *tokens, const size_t ntokens)
     // enough.
     if (it) {
 #ifdef USE_ZSTD
-        int nbytes = ITEM_is_zstd(it)? mcz_orig_size(ITEM_data(it), it->nbytes):it->nbytes;
+        int nbytes = ITEM_is_zstd(it)? mcdc_orig_size(ITEM_data(it), it->nbytes):it->nbytes;
 #else
         int nbytes = it->nbytes;
 #endif
@@ -2926,7 +2926,7 @@ void process_command_ascii(conn *c, char *command) {
     }
 #ifdef USE_ZSTD
     if (ntokens >= 2 && strcmp(tokens[COMMAND_TOKEN].value, "mcdc") == 0) {
-        process_mcz_command_ascii(c, tokens, ntokens);
+        process_mcdc_command_ascii(c, tokens, ntokens);
         return;
     }
 #endif

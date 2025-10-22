@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 /*
- * mcz_cmd.h - Declarations for custom MCZ commands in memcached.
+ * mcdc_cmd.h - Declarations for custom MC/DC commands in memcached.
  *
  * This header defines prototypes and constants for the text
- * command extensions used by the MCZ module. These include "mcz stats",
- * "mcz ns", "mcz config" and "mcz sampler", which allow clients to query runtime
+ * command extensions used by the MC/DC module. These include "mcdc stats",
+ * "mcdc ns", "mcdc config" and "mcz sampler", which allow clients to query runtime
  * statistics, list active namespaces, view current configuration and control data sampling.
  *
  * Responsibilities:
@@ -37,7 +37,7 @@ extern "C" {
 #endif
 
 /* Ascii handler */
-void process_mcz_command_ascii(conn *c, token_t *tokens, const size_t ntokens);
+void process_mcdc_command_ascii(conn *c, token_t *tokens, const size_t ntokens);
 
 #ifdef __cplusplus
 }

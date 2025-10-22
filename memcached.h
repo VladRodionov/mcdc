@@ -61,7 +61,7 @@
 #include "sasl_defs.h"
 
 #ifdef USE_ZSTD
-#include "mcz_compression.h"
+#include "mcdc_compression.h"
 #endif
 
 /* for NAPI pinning feature */

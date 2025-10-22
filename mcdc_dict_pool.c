@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 /*
- * mcz_dict_pool.c
+ * mcdc_dict_pool.c
  *
  * Global registry (pool) for compiled dictionaries (ZSTD_CDict / ZSTD_DDict).
  *
@@ -33,7 +33,7 @@
  *   - Freed only when refcount drops to zero.
  *
  * Naming convention:
- *   - All functions/types prefixed with `mcz_dict_pool_*` belong here.
+ *   - All functions/types prefixed with `mcdc_dict_pool_*` belong here.
  */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1   // for O_CLOEXEC on glibc + some GNU bits
@@ -42,8 +42,8 @@
 #define _POSIX_C_SOURCE 200809L  // for setenv(), unsetenv(), realpath(), etc.
 #endif
 
-#include "mcz_dict_pool.h"
-#include "mcz_utils.h"
+#include "mcdc_dict_pool.h"
+#include "mcdc_utils.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -62,7 +62,7 @@ typedef struct pool_entry_s {
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static pool_entry_t   *g_head = NULL;
 
-char *make_key_from_meta(const mcz_dict_meta_t *m) {
+char *make_key_from_meta(const mcdc_dict_meta_t *m) {
     /* Prefer a strong identity if we have it (signature),
        otherwise fall back to absolute dict_path. */
     if (m->signature && *m->signature) return strdup(m->signature);
@@ -70,13 +70,13 @@ char *make_key_from_meta(const mcz_dict_meta_t *m) {
     return NULL; /* should not happen for valid metas */
 }
 
-int mcz_dict_pool_init(void) {
+int mcdc_dict_pool_init(void) {
     g_head = NULL;
     if (pthread_mutex_init(&g_lock, NULL) != 0) return -1;
     return 0;
 }
 
-void mcz_dict_pool_shutdown(void) {
+void mcdc_dict_pool_shutdown(void) {
     pthread_mutex_lock(&g_lock);
     pool_entry_t *e = g_head;
     g_head = NULL;
@@ -110,7 +110,7 @@ static pool_entry_t *find_locked(const char *key) {
  * - if entry exists, we deallocate dicts and reuse existing from an entry (side effect)
  * Returns 0 on success, <0 on error.
  */
-int mcz_dict_pool_retain_for_meta(mcz_dict_meta_t *m, char **err_out)
+int mcdc_dict_pool_retain_for_meta(mcdc_dict_meta_t *m, char **err_out)
 {
     if (!m) {
         set_err(err_out, "dict_pool: NULL meta passed to retain");
@@ -172,7 +172,7 @@ int mcz_dict_pool_retain_for_meta(mcz_dict_meta_t *m, char **err_out)
     return 0;
 }
 
-void mcz_dict_pool_release_for_meta(const mcz_dict_meta_t *m, int32_t *ref_left, char **err_out) {
+void mcdc_dict_pool_release_for_meta(const mcdc_dict_meta_t *m, int32_t *ref_left, char **err_out) {
     if (!m) return;
     char *key = make_key_from_meta(m);
     if (!key) return;
@@ -198,7 +198,7 @@ void mcz_dict_pool_release_for_meta(const mcz_dict_meta_t *m, int32_t *ref_left,
     free(key);
 }
 
-int mcz_dict_pool_refcount_for_meta(const mcz_dict_meta_t *meta)
+int mcdc_dict_pool_refcount_for_meta(const mcdc_dict_meta_t *meta)
 {
     if (!meta) return -1;
     const char *key = (meta->signature && *meta->signature)
@@ -223,13 +223,13 @@ int mcz_dict_pool_refcount_for_meta(const mcz_dict_meta_t *meta)
     return -1;
 }
 
-void mcz_dict_pool_dump(FILE *out)
+void mcdc_dict_pool_dump(FILE *out)
 {
     if (!out) out = stdout;
 
     pthread_mutex_lock(&g_lock);
 
-    fprintf(out, "---- MCZ Dictionary Pool Dump ----\n");
+    fprintf(out, "---- MC/DC Dictionary Pool Dump ----\n");
 
     pool_entry_t *cur = g_head;
     size_t n = 0;
