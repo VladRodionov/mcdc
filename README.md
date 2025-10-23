@@ -9,7 +9,7 @@
 changes. MC/DC is developed and maintained by a former co-founder of [Carrot Data](https://github.com/carrotdata) — a project focused on practical, 
 SSD-friendly, memory-efficient caching technologies.
 
-⚠️ Important: This is still experimantal work. First public release is the Developer Preview only. 
+⚠️ Important: This is still an experimantal work. First public release is the Developer Preview only. 
 
 ## What Is MC/DC?
 
@@ -173,7 +173,7 @@ memcached-debug   # debug
 Example startup with dictionary compression enabled:
 
 ```
-./memcached -m 3000 -z mcz.conf -p 11211
+./memcached -m 3000 -z mcdc.conf -p 11211
 ```
 
 Or if you want to run "vanilla" `memcached`
@@ -182,7 +182,7 @@ Or if you want to run "vanilla" `memcached`
 ./memcached -m 3000 -o mcdc_disabled -p 11211
 ```
 
-Example mcz.conf:
+Example mcdc.conf:
 
 ```
 enable_comp=true
@@ -209,6 +209,21 @@ spool_max_bytes=64MB
 ```
 For deployment, monitoring, and systemd service integration, see the official Memcached installation guide.
 MC/DC follows the same conventions and CLI options.
+
+## Development Branch
+
+The active development branch for the MC/DC project is **`mcdc`**. It serves as the **master branch** for all current work, 
+new features, and bug fixes. Stable and release candidate builds are tagged directly from this branch (e.g.,
+`1.6.38-mcdc-dev2`, `1.6.38-mcdc-rc1`, `1.6.38-mcdc`).
+
+## Branching & Release Strategy
+
+| Branch / Tag | Purpose | Notes |
+|---------------|----------|-------|
+| **`mcdc`** | Mainline development | All active work happens here. Periodically tagged for dev and RC releases. |
+| **`master`** | Upstream Memcached baseline | Tracks the latest official Memcached release (e.g., `1.6.39`). Used for future merges and rebase points. |
+| **`feature/*`** | Experimental or isolated development | Short-lived branches for specific experiments, refactors, or new module integrations. |
+| **Tags (`1.6.38-mcdc-devX`, `1.6.38-mcdc-rcX`, etc.)** | Snapshot or release identifiers | Tag releases created from `mcdc` branch for testing or distribution. |
 
 ## Current limitations
 
