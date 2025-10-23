@@ -221,7 +221,7 @@ new features, and bug fixes. Stable and release candidate builds are tagged dire
 | Branch / Tag | Purpose | Notes |
 |---------------|----------|-------|
 | **`mcdc`** | Mainline development | All active work happens here. Periodically tagged for dev and RC releases. |
-| **`main`** or **`master`** | Upstream Memcached baseline | Tracks the latest official Memcached release (e.g., `1.6.39`). Used for future merges and rebase points. |
+| **`master`** | Upstream Memcached baseline | Tracks the latest official Memcached release (e.g., `1.6.39`). Used for future merges and rebase points. |
 | **`feature/*`** | Experimental or isolated development | Short-lived branches for specific experiments, refactors, or new module integrations. |
 | **Tags (`1.6.38-mcdc-devX`, `1.6.38-mcdc-rcX`, etc.)** | Snapshot or release identifiers | Tag releases created from `mcdc` branch for testing or distribution. |
 
