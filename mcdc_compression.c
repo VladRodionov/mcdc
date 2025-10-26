@@ -84,6 +84,9 @@ static const mcdc_table_t *mcdc_current_table(void) {
 
 #define KB(x)  ((size_t)(x) << 10)
 #define MB(x)  ((size_t)(x) << 20)
+#define CHECK_Z(e) do { size_t _r = (e); \
+  if (ZSTD_isError(_r)) { fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, ZSTD_getErrorName(_r));} \
+} while (0)
 
 /* sane absolute limits */
 enum {
@@ -163,8 +166,11 @@ int mcdc_set_max_value_limit(size_t limit){
 }
 
 static void tls_ensure(size_t need) {
-    if (!tls.cctx)
+    if (!tls.cctx) {
         tls.cctx = ZSTD_createCCtx();
+        CHECK_Z(ZSTD_CCtx_setParameter(tls.cctx, ZSTD_c_checksumFlag, 0));
+        CHECK_Z(ZSTD_CCtx_setParameter(tls.cctx, ZSTD_c_dictIDFlag, 0));
+    }
     if (!tls.dctx)
         tls.dctx = ZSTD_createDCtx();
     if (need > tls.cap) {
@@ -836,13 +842,11 @@ ssize_t mcdc_maybe_compress(const void *src, size_t src_sz, const void *key, siz
     size_t bound = ZSTD_compressBound(src_sz);
     tls_ensure(bound);                         /* ensure scratch ≥ bound */
     void *dst_buf = tls.scratch;
+    
+    CHECK_Z(ZSTD_CCtx_refCDict(tls.cctx, cd));
 
     /* 3.  compress ----------------------------------------------- */
-    size_t csz = cd
-        ? ZSTD_compress_usingCDict(tls.cctx, dst_buf, bound,
-                                   src, src_sz, cd)
-        : ZSTD_compressCCtx      (tls.cctx, dst_buf, bound,
-                                   src, src_sz, ctx->cfg->zstd_level);
+    size_t csz = ZSTD_compress2(tls.cctx, dst_buf, bound, src, src_sz);
     if (ZSTD_isError(csz)) {
         atomic_inc64(&stats->compress_errs, 1);
         return -1;
