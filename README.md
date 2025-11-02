@@ -21,7 +21,7 @@ tweets, JSON fragments, log entries, etc. — at minimal CPU cost.
 
 All standard Memcached commands, clients, and SDKs continue to work unchanged.
 
-## Dictionary Compression — Why It Matters
+## Dictionary Compression 101
 
 Typical “client-side compression” operates in isolation: every key/value pair is compressed 
 independently, often wasting space on per-object headers, redundant Huffman tables, and 
@@ -67,7 +67,7 @@ They introduced it under the name “Managed Compression” in a 2018 engineerin
 > Managed compression exploits knowledge of the structure of the key (when available) to intelligently group values into self-similar categories.
 > It then trains and ships dictionaries for the highest-volume categories.
 > The gains vary by use case but can be significant.
-> Our caches can store up to 40 percent more data using the same hardware.”
+> Our caches can store up to **40 percent more data** using the same hardware.”
 — Facebook Engineering Blog, 2018
 
 In MC/DC these "self-similar" categories are called "namespaces". See [Quick Start Guide](https://github.com/VladRodionov/mcdc/wiki/Quick-Start-Guide) for more information.
@@ -88,23 +88,11 @@ While Facebook’s *Managed Compression* was a pioneering concept, **MC/DC** tak
 By embedding training, monitoring, and dictionary management directly inside the cache, MC/DC eliminates the need for any external coordination service — achieving
 the benefits of Managed Compression with zero infrastructure overhead.
 
-In short:
-
-> Facebook invented it, MC/DC democratized it.
-
-### Real-World Impact
-
-Real-world deployments have shown that dictionary-based compression dramatically improves cache efficiency — especially for workloads dominated by small and repetitive objects (e.g. JSONs, tweets, logs, or structured metadata).
-
-What We Know from Industry
-- Facebook reported up to 40 % more data stored on the same hardware using managed compression.
-- Their gains were consistent across multiple caching tiers and data types — demonstrating that even modest redundancy across keys can yield major savings once a shared dictionary is applied.
-
 ### What to Expect from MC/DC
 
 MC/DC integrates this idea directly into the caching layer, so you can expect:
-- up to 1.5 × – 2.0 × memory savings on typical web-scale datasets
-- Negligible CPU overhead thanks to the use of Zstandard’s dictionary mode and adaptive training heuristics
+- up to 1.5x – 2.0x memory savings on typical web-scale datasets
+- Reasonably moderate CPU overhead thanks to the use of Zstandard’s dictionary mode and adaptive training heuristics
 - Automatic adaptation — as your workload evolves, MC/DC retrains dictionaries and updates them without downtime
 - Compression ratios that outperform any client-side compression, because MC/DC compresses across similar objects, not just within each value
 
@@ -114,7 +102,7 @@ MC/DC integrates this idea directly into the caching layer, so you can expect:
 - **Zstandard dictionary compression** with automatic retraining  
 - **Dynamic sampling** and adaptive dictionary updates  
 - **Namespace-aware** compression and statistics  
-- **Low CPU overhead** — typical impact under 20-30 % (relative to a baseline) at 2× memory savings  
+- **Low CPU overhead** — typical impact under 20-30 % (relative to a baseline) at 2x memory savings  
 - **JSON-based configuration and introspection commands**  
 - **Zero client changes, no proxy required**
 - **Text, meta and binary protocols** are supported
@@ -167,7 +155,7 @@ MacOS - use `build-mac.sh`
 You’ll get:
 ```
 memcached         # optimized release build + dictionary compression
-memcached-debug   # debug
+memcached-debug   # debug version
 ```
 
 Example startup with dictionary compression enabled:
