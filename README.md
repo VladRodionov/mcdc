@@ -90,7 +90,7 @@ the benefits of Managed Compression with zero infrastructure overhead.
 
 ### What to Expect from MC/DC
 
-MC/DC integrates this idea directly into the caching layer, so you can expect:
+MC/DC integrates managed compression idea directly into the caching layer, so you can expect:
 - up to 1.5x – 2.0x memory savings on typical web-scale datasets
 - Reasonably moderate CPU overhead thanks to the use of Zstandard’s dictionary mode and adaptive training heuristics
 - Automatic adaptation — as your workload evolves, MC/DC retrains dictionaries and updates them without downtime
@@ -137,7 +137,7 @@ Tested on Linux (x86-64 / aarch64) and macOS (arm64 / x86-64)
 git clone https://github.com/VladRodionov/mcdc.git
 cd mcdc
 git fetch --all --tags       # Make sure you have all tags
-git checkout 1.6.38-mcdc-dev2
+git checkout 1.6.38-mcdc-dev3
 ```
 
 Linux(Ubuntu):
