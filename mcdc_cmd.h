@@ -13,20 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/*
- * mcdc_cmd.h - Declarations for custom MC/DC commands in memcached.
- *
- * This header defines prototypes and constants for the text
- * command extensions used by the MC/DC module. These include "mcdc stats",
- * "mcdc ns", "mcdc config" and "mcz sampler", which allow clients to query runtime
- * statistics, list active namespaces, view current configuration and control data sampling.
- *
- * Responsibilities:
- *   - Declare command opcodes for the binary protocol.
- *   - Provide function prototypes for ASCII command dispatcher
- *   - Export accessors to retrieve runtime configuration for serialization.
- *
- */
+
 #pragma once
 #include "memcached.h"     /* conn, out_string, write_* */
 #include "proto_text.h"

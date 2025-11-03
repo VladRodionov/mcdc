@@ -13,26 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/*
- * mcdc_eff_atomic.h
- *
- * Efficiency tracker ("eff") for compression dictionaries.
- *
- * Tracks an Exponentially Weighted Moving Average (EWMA) of compression
- * efficiency (compressed_size / original_size). Provides lock-free APIs
- * for:
- *   - Recording compression observations (hot path).
- *   - Querying current EWMA and baseline efficiency.
- *   - Determining when retraining should occur.
- *   - Marking retrain completion and updating baseline.
- *   - Configuring retrain thresholds (interval, bytes, drop, etc.).
- *
- * Notes:
- *   - Baseline is non-increasing: it only improves with retraining.
- *   - Atomic-only design: no mutexes in the hot path.
- *   - Global singleton instance (like mcdc_ctx): no need to pass a tracker
- *     around.
- */
+
 #ifndef MCDC_EFF_ATOMIC_H
 #define MCDC_EFF_ATOMIC_H
 
@@ -40,7 +21,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>   /* memcpy */
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C" {

@@ -51,10 +51,10 @@
 #include <sys/time.h>
 #include <time.h>
 
-#include <limits.h>     // PATH_MAX (may be undefined; we handle fallback)
-#include <sys/stat.h>   // fstat
+#include <limits.h>
+#include <sys/stat.h>
 #include <sys/types.h>
-#include <dirent.h>     // DIR, opendir, dirfd, closedir
+#include <dirent.h>
 
 // Thread-local state (must be seeded once per thread)
 static __thread uint32_t rnd_state = 2463534242u; // arbitrary nonzero seed

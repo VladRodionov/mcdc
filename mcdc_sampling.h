@@ -13,21 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/*
- * mcdc_sampling.h
- *
- * Standalone background sampler for key/value data.
- * - Producers call mcdc_sampler_maybe_record() to submit samples (Bernoulli p).
- * - An internal MPSC queue buffers records.
- * - A single background thread drains to a spool file until a size cap or timed window expired.
- * - When the file hits the cap, sampling is auto-disabled.
- *
- * Record format (LE):
- *   uint32_t key_len;
- *   uint32_t val_len;
- *   <key bytes>
- *   <val bytes>
- */
 
 #pragma once
 #include <stddef.h>

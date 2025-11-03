@@ -13,28 +13,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/*
- * mcdc_dict_pool.h
- *
- * Implementation of the global dictionary pool.
- * Manages reference counts and lifetime of shared ZSTD_CDict / ZSTD_DDict
- * objects across namespaces and published tables.
- *
- * Key duties:
- *   - Retain/release APIs for mcdc_dict_meta_t.
- *   - Reference count tracking.
- *   - Final free when no users remain.
- */
+
 #ifndef MCDC_DICT_POOL_H
 #define MCDC_DICT_POOL_H
 
 #include <stdatomic.h>
 #include <stdbool.h>
-#include <stdio.h>   /* for FILE* */
+#include <stdio.h>
 
 
-#include "zstd.h"  /* ZSTD_{C,}Dict */
-#include "mcdc_dict.h" /* mcdc_dict_meta_t (for dict_path/signature) */
+#include "zstd.h"
+#include "mcdc_dict.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -59,7 +48,6 @@ void mcdc_dict_pool_release_for_meta(const mcdc_dict_meta_t *m, int32_t *ref_lef
 int mcdc_dict_pool_refcount_for_meta(const mcdc_dict_meta_t *meta);
 
 /* Dump the current dictionary pool state to the given FILE*.
- * Example usage: mcdc_dict_pool_dump(stdout);
  */
 void mcdc_dict_pool_dump(FILE *out);
 

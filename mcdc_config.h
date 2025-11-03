@@ -13,16 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/*
- * mcdc_config.h
- *
- * Implementation of configuration management for MC/DC.
- *
- * Key duties:
- *   - Parse and validate configuration sources.
- *   - Initialize config structures with defaults.
- *   - Expose safe accessors to other modules.
- */
+
 #ifndef MCDC_CONFIG
 #define MCDC_CONFIG
 

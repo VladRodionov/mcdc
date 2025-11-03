@@ -42,19 +42,19 @@
 #define ZDICT_STATIC_LINKING_ONLY
 #include <unistd.h>
 #include <pthread.h>
-#include <stdio.h>          /* FILE, fopen, fread, fclose */
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
 #include <errno.h>
 #include <assert.h>
-#include <unistd.h>         /* usleep                     */
-#include <zdict.h>          /* ZDICT_trainFromBuffer      */
+#include <unistd.h>
+#include <zdict.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <dirent.h>
-#include <limits.h>         /* PATH_MAX                   */
+#include <limits.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include "mcdc_incompressible.h"
@@ -68,7 +68,7 @@
 static __thread tls_cache_t tls; /* zero-initialised */
 
 /* ---------- zstd context --------------------------------------------- */
-mcdc_ctx_t g_mcz = { 0 };      /* zero-init by the loader */
+mcdc_ctx_t g_mcz = { 0 };
 
 /* ---------- zstd context helpers ------------------------------------ */
 const mcdc_ctx_t *mcdc_ctx(void)      { return &g_mcz; }
@@ -573,7 +573,7 @@ int mcdc_init(void) {
     mcdc_config_sanity_check();
 
     mcdc_cfg_t *cfg = ctx->cfg;
-    /* 1. atomic pointers / counters */
+    /* atomic pointers / counters */
     atomic_init(&ctx->samples_head, NULL); /* empty list            */
     atomic_init(&ctx->bytes_pending, 0);
     ctx->trainer_tid = (pthread_t ) { 0 }; /* will be set by trainer thread */
@@ -812,7 +812,7 @@ void mcdc_report_decomp_err(const char *key, size_t klen) {
 ssize_t mcdc_maybe_compress(const void *src, size_t src_sz, const void *key, size_t key_sz,
                     void **dst, uint16_t *dict_id_out)
 {
-    mcdc_ctx_t *ctx = mcdc_ctx_mut();          /* global-static instance */
+    mcdc_ctx_t *ctx = mcdc_ctx_mut();
     if (!ctx->cfg->enable_comp){
         return 0;
     }

@@ -45,7 +45,7 @@
 #include <string.h>
 #include <strings.h>
 
-#include "memcached.h"                  /* settings, mcdc_cfg_t          */
+#include "memcached.h"
 #include "mcdc_config.h"
 
 

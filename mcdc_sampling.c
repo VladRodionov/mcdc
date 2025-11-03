@@ -76,8 +76,8 @@ static inline full_sample_node_t *reverse_list(full_sample_node_t *h) {
 typedef struct {
     char   *spool_dir;        /* owned copy */
     double  sample_p;         /* 0..1 */
-    int sample_window_sec;
-    size_t  spool_max_bytes;        /* file cap */
+    int sample_window_sec;    /* max sampling duration, 0 - no limit */
+    size_t  spool_max_bytes;  /* file cap */
 } sampler_cfg_t;
 
 static sampler_cfg_t g_cfg        = {0};
@@ -179,8 +179,6 @@ static void *sampler_main(void *arg) {
         return NULL;
     }
 
-    /* 1 MiB fully-buffered stream (tweak as desired) */
-    //static const size_t kBufSize = 1u << 20;
     (void)setvbuf(fp, NULL, _IOFBF, 1u << 16);
 
     atomic_store_explicit(&g_written, 0, memory_order_release);

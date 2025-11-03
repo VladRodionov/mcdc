@@ -13,26 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/*
- * mcdc_stats.h
- *
- * Statistics subsystem for MC/DC (Memcached with Dictionary Compression).
- *
- * Responsibilities:
- *   - Define atomic counters for tracking cache and compression metrics.
- *   - Provide inline helpers to increment, read, and set atomic counters.
- *   - Expose the public API for accessing global and per-namespace stats.
- *   - Declare functions for snapshotting and reporting statistics.
- *
- * Design:
- *   - Uses C11 _Atomic types for counters, updated with relaxed atomics.
- *   - Registry maintains global stats and a map of per-namespace stats.
- *   - Lookups are lock-free and O(1) using an RCU-lite snapshot table.
- *   - Rebuild replaces the namespace table when manifest changes occur.
- *
- * Naming convention:
- *   - All functions and types prefixed with `mcdc_stats_*`.
- */
+
 #pragma once
 #include <stdatomic.h>
 #include <stdint.h>

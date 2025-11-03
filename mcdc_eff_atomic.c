@@ -188,21 +188,21 @@ void mcdc_eff_mark_retrained(uint64_t now_s)
     atomic_store_explicit(&g_eff.last_train_ts_s,   now_s, memory_order_release);
 }
 
-/* 1. Return current EWMA as double */
+/* Return current EWMA as double */
 double mcdc_eff_get_ewma(void)
 {
     uint64_t bits = atomic_load_explicit(&g_eff.ewma_bits, memory_order_acquire);
     return u642dbl(bits);
 }
 
-/* 2. Return baseline as double */
+/* Return baseline as double */
 double mcdc_eff_get_baseline(void)
 {
     uint64_t bits = atomic_load_explicit(&g_eff.baseline_bits, memory_order_acquire);
     return u642dbl(bits);
 }
 
-/* 3. Return seconds since last training */
+/* Return seconds since last training */
 uint64_t mcdc_eff_last_train_seconds(void)
 {
     uint64_t last = atomic_load_explicit(&g_eff.last_train_ts_s, memory_order_acquire);

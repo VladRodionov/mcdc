@@ -13,19 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/*
- * mcdc_gc.h
- *
- * Implementation of garbage collector (GC) for retired dictionary tables.
- * Enqueues old mcdc_table_t instances and reclaims them after a cooling-off
- * period. Runs as a background thread draining the retired stack.
- *
- * Key duties:
- *   - Background GC loop (thread).
- *   - Retired table enqueue/drain.
- *   - Table + dictionary metadata cleanup.
- *   - Optional unlink of obsolete files.
- */
+
 #ifndef MCDC_GC_H
 #define MCDC_GC_H
 

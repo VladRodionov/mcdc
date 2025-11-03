@@ -350,7 +350,7 @@ static int cfg_json(char *buf, size_t cap, mcdc_cfg_t *c) {
     if (!c) return -1;
 
     /* crude escape: assume paths don’t contain embedded quotes/newlines;
-     if they might, add a tiny JSON-escape helper. */
+     if they might, we will need a tiny JSON-escape helper. */
     const char *dict_dir = c->dict_dir ? c->dict_dir : "";
     const char *spool_dir= c->spool_dir ? c->spool_dir : "";
 

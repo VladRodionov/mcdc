@@ -13,18 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/*
- * mcdc_utils.h
- *
- * Implementation of shared utility functions used by MCZ modules.
- *
- * Key duties:
- *   - Error string formatting.
- *   - Atomic file/text writes.
- *   - Time/date formatting in RFC3339 UTC.
- *   - Safe directory sync after file operations.
- *   - String utilities (e.g., join namespace array).
- */
+
 #ifndef MCDC_UTILS_H
 #define MCDC_UTILS_H
 #include <stdint.h>

@@ -13,18 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/*
- * mcdc_incompressible.c
- *
- * Implementation of incompressible payload detection for MC/DC.
- *
- * Key duties:
- *   - Evaluate data samples for entropy or patterns.
- *   - Quickly decide whether to bypass compression.
- *   - Maintain state for tuning thresholds if enabled.
- *
- *   You can override defaults with -DMCDC_SAMPLE_BYTES=512 etc.
- */
 #ifndef MCDC_INCOMPRESSIBLE_H
 #define MCDC_INCOMPRESSIBLE_H
 

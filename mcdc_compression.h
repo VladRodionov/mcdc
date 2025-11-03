@@ -13,22 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/*
- * mcdc_compression.h
- *
- * Core compression/decompression API for memcached-Zstd (MC/DC).
- *
- * Responsibilities:
- *   - Define context structures and thread-local caches for Zstd.
- *   - Expose functions to compress and decompress payloads.
- *   - Provide hooks for dictionary usage (CDict/DDict) and training integration.
- *
- * Design:
- *   - All compression state is kept in `mcdc_ctx_t` and `tls_cache_t`.
- *   - Thread-local cache avoids expensive Zstd context recreation.
- *   - Copy-on-write dictionary table publishing for safe hot updates.
- *   - All exported symbols prefixed with `mcdc_` for clarity.
- */
+
 #ifndef MCDC_COMPRESSION_H
 #define MCDC_COMPRESSION_H
 
@@ -49,8 +34,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-
 
 /* ---------- sample node ------------------------------------------------ */
 typedef struct sample_node_s {

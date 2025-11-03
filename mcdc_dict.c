@@ -831,7 +831,7 @@ int mcdc_save_dictionary_and_manifest(const char *dir,
     }
 
     char *dict_abs = NULL;
-    char *dict_base = NULL;   /* "<uuid>.dict" */
+    char *dict_base = NULL;
     char *mf_abs = NULL;
     size_t saved_size = 0;
 
@@ -959,10 +959,6 @@ static int space_append_meta(mcdc_ns_entry_t *sp, mcdc_dict_meta_t *m) {
     return 0;
 }
 
-
-/* Build a brand-new table = deep copy of old + one extra meta (as newest),
- * enforcing max_per_ns per-namespace (0 => unlimited).
- */
 
 static mcdc_ns_entry_t *find_space(mcdc_ns_entry_t **spaces, size_t n, const char *pref) {
     for (size_t i = 0; i < n; ++i) {

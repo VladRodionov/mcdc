@@ -13,18 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/*
- * mcdc_dict.h
- *
- * Implementation of dictionary metadata and routing table subsystem.
- * Handles manifest parsing/writing, dictionary saving/loading, and
- * copy-on-write publishing of new router tables.
- *
- * Key duties:
- *   - Manage mcdc_dict_meta_t lifecycle.
- *   - Build and publish mcdc_table_t atomically.
- *   - Namespace routing and ID lookups.
- */
+
 #pragma once
 #ifndef MCDC_DICT_H
 #define MCDC_DICT_H
